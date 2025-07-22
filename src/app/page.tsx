@@ -38,14 +38,14 @@ const DashboardPage = () => {
         <Card className="w-80 shadow-lg hover:shadow-xl transition-shadow bg-white">
           <CardHeader>
             <CardTitle className="text-center text-xl font-bold text-gray-800">
-              Admin Panel
+              Aaudit Panel
             </CardTitle>
           </CardHeader>
           <CardContent className="text-center">
-            <p className="text-gray-600 mb-4">Manage users, orders, and system settings.</p>
+            <p className="text-gray-600 mb-4">View and manage audit reports.</p>
             <Link href="/admin">
               <Button className="w-full bg-blue-600 hover:bg-blue-700 text-black font-semibold py-2 rounded-lg transition-colors">
-                Go to Admin
+                Continue
               </Button>
             </Link>
           </CardContent>
