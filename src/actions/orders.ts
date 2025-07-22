@@ -83,34 +83,3 @@ export const getMonthlyOrders = async () => {
 };
 
 //check status
-export const checkApprovedOrdersAndDecrementStock = async () => {
-  const supabase = await createClient();
-
-  // Fetch orders with 'Approved' status (you can add a timestamp or other logic to only check recent updates)
-  const { data: orders, error: fetchError } = await supabase
-    .from('order')
-    .select('id, status')
-    .eq('status', 'Approved')  // Only check orders with 'Approved' status
-    .eq('processed', false);  // Flag to ensure we don’t process already processed orders
-
-  if (fetchError) {
-    console.error('Error fetching orders:', fetchError);
-    return;
-  }
-
-  for (const order of orders) {
-    console.log(`Processing order ${order.id} with status ${order.status}`);
-
-    // Fetch order items for each order
-    const { data: orderItems, error: fetchOrderItemsError } = await supabase
-      .from('order_item')
-      .select('product, quantity')
-      .eq('order', order.id);
-
-    if (fetchOrderItemsError) {
-      console.error('Error fetching order items for order:', order.id);
-      continue;
-    }
-    
-  }
-};

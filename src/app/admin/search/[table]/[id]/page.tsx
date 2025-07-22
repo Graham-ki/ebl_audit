@@ -19,7 +19,7 @@ export default function ItemDetailsPage() {
         const { data, error } = await supabase
           .from(table as 'users' | 'order' | 'category' | 'expenses' | 'ledger' | 'materials' | 'order_item' | 'product' | 'products_materials' | 'proof_of_payment' | 'finance')
           .select('*')
-          .eq('id', id)
+          .eq('id', Array.isArray(id) ? id[0] : id)
           .single();
 
         if (error) throw error;
