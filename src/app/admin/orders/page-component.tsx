@@ -234,7 +234,6 @@ export default function PageComponent({ ordersWithProducts }: Props) {
               <TableHead className="font-semibold text-gray-700">Status</TableHead>
               <TableHead className="font-semibold text-gray-700">Marketer</TableHead>
               <TableHead className="font-semibold text-gray-700">Order Items</TableHead>
-              <TableHead className="font-semibold text-gray-700">Proofs</TableHead>
               <TableHead className="font-semibold text-gray-700">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -285,58 +284,7 @@ export default function PageComponent({ ordersWithProducts }: Props) {
                 </TableCell>
 
                 {/* View Proofs Button */}
-                <TableCell>
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleViewProofs(order.id)}
-                        className="text-blue-600 hover:bg-blue-50"
-                      >
-                        View Proofs
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-2xl rounded-lg">
-                      <DialogHeader>
-                        <DialogTitle className="text-lg font-semibold">Payment Receipts</DialogTitle>
-                      </DialogHeader>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto p-2">
-                        {proofs.length > 0 ? (
-                          proofs.map(proof => (
-                            <div key={proof.id} className="border rounded-lg p-3">
-                              <Image
-                                src={proof.file_url}
-                                alt={`Proof of payment ${proof.id}`}
-                                width={300}
-                                height={200}
-                                className="rounded-md object-contain w-full h-auto"
-                              />
-                              <div className="mt-3 flex justify-between items-center">
-                                <span className="text-sm text-gray-500">ID: {proof.id}</span>
-                                <a 
-                                  href={proof.file_url} 
-                                  download 
-                                  className="text-sm text-blue-600 hover:underline flex items-center"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                  </svg>
-                                  Download
-                                </a>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="col-span-2 text-center py-8 text-gray-500">
-                            No payment proofs available for this order
-                          </div>
-                        )}
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                </TableCell>
-
+               
                 {/* Action Buttons */}
                 <TableCell>
                   <div className="flex space-x-2">
