@@ -488,28 +488,6 @@ export default function FinancialSummaryPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-        <Card className="bg-blue-50 border-blue-200">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-blue-600">
-              <span>💵</span>
-              <span>Cash Summary</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xl font-mono font-bold">{formatCurrency(financialSummary.cash)}</p>
-            <p className="text-sm text-gray-500 mt-1">Total cash deposits</p>
-            <Button 
-              variant="link" 
-              className="mt-2 p-0 h-auto text-blue-600"
-              onClick={() => fetchPaymentDetails("Cash")}
-            >
-              View Details
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="rounded-lg max-w-md">
           <DialogHeader>
