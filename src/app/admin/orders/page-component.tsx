@@ -176,22 +176,6 @@ export default function PageComponent({ ordersWithProducts }: Props) {
         </p>
       </div>
 
-      {/* Warning banner with improved visibility */}
-      {showWarning && (
-        <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-800 p-4 mb-6 rounded-lg flex justify-between items-center">
-          <div>
-            <span className="font-semibold">⚠️ Important Notice:</span>
-            <p className="mt-1">All proofs of payment will be automatically deleted after 7 days!</p>
-          </div>
-          <button
-            onClick={() => setShowWarning(false)}
-            className="text-amber-600 hover:text-amber-800 text-xl font-bold p-1"
-          >
-            &times;
-          </button>
-        </div>
-      )}
-
       {/* Filter controls with better organization */}
       <div className="bg-white p-4 rounded-lg shadow-sm mb-6">
         <div className="flex flex-wrap gap-3 items-center">
@@ -247,12 +231,9 @@ export default function PageComponent({ ordersWithProducts }: Props) {
           <TableHeader className="bg-gray-50">
             <TableRow>
               <TableHead className="font-semibold text-gray-700">Date</TableHead>
-              <TableHead className="font-semibold text-gray-700">Track ID</TableHead>
-              <TableHead className="font-semibold text-gray-700">Order ID</TableHead>
-              <TableHead className="font-semibold text-gray-700">Reception</TableHead>
               <TableHead className="font-semibold text-gray-700">Status</TableHead>
               <TableHead className="font-semibold text-gray-700">Marketer</TableHead>
-              <TableHead className="font-semibold text-gray-700">Products</TableHead>
+              <TableHead className="font-semibold text-gray-700">Order Items</TableHead>
               <TableHead className="font-semibold text-gray-700">Proofs</TableHead>
               <TableHead className="font-semibold text-gray-700">Actions</TableHead>
             </TableRow>
@@ -263,9 +244,6 @@ export default function PageComponent({ ordersWithProducts }: Props) {
                 <TableCell className="text-gray-600">
                   {format(new Date(order.created_at), 'MMM dd, yyyy')}
                 </TableCell>
-                <TableCell className="font-medium text-gray-900">{order.id}</TableCell>
-                <TableCell className="text-gray-600">{order.slug}</TableCell>
-                <TableCell className="text-gray-600">{order.receiption_status}</TableCell>
                 <TableCell>
                   <Select
                     onValueChange={value => handleStatusChange(order.id, value)}
