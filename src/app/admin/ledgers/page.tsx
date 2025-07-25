@@ -165,6 +165,32 @@ export default function LedgerPage() {
             </div>
           </CardContent>
         </Card>
+
+        <Card 
+          className="cursor-pointer border border-gray-100 hover:border-green-200 bg-white hover:bg-green-50 shadow-sm hover:shadow-md transition-all duration-200 ease-in-out group"
+          onClick={() => router.push('/admin/ledgers/general')}
+        >
+          <CardHeader className="flex flex-row items-center space-x-4">
+            <div className="p-3 rounded-lg bg-green-100 text-green-600 group-hover:bg-green-200 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <div>
+              <CardTitle className="text-lg font-semibold text-gray-800">General Ledger</CardTitle>
+              <p className="text-sm text-gray-600 mt-1">Monitor all financial transactions</p>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-green-600 text-sm font-medium flex items-center">
+              View details
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </CardContent>
+        </Card>
+
       </div>
     </div>
   );
