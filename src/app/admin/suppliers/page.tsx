@@ -518,12 +518,6 @@ export default function Suppliers() {
                         >
                           <span>📦</span> View Supplies
                         </button>
-                        <button 
-                          onClick={() => handleDeleteSupplier(supplier.id)}
-                          className="px-3 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 flex items-center gap-1"
-                        >
-                          <span>🗑️</span> Delete
-                        </button>
                       </div>
                     </td>
                   </tr>
