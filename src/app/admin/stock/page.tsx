@@ -68,21 +68,7 @@ export default function LedgerPage() {
           </CardContent>
         </Card>
 
-        {/* Specifications Card */}
-        <Card 
-          className="cursor-pointer border border-gray-100 hover:border-yellow-200 bg-white hover:bg-yellow-50 shadow-sm hover:shadow-md transition-all duration-200 ease-in-out"
-          onClick={() => router.push('/admin/stock/specifications')}
-        >
-          <CardHeader className="flex flex-row items-center space-x-4">
-            <div className="p-2 rounded-lg bg-yellow-100 text-yellow-600">
-              <span className="text-xl">📝</span>
-            </div>
-            <CardTitle className="text-lg font-semibold text-gray-800">Beverage Specifications</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-600">Track contents and dimensions</p>
-          </CardContent>
-        </Card>
+       
       </div>
 
       {/* Optional onboarding tip - can be removed later */}
