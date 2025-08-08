@@ -18,6 +18,8 @@ import {
   DialogTitle,
   DialogTrigger,
   DialogDescription,
+  DialogFooter,
+  DialogClose,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -45,22 +47,17 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 type Product = {
   id: number;
   title: string;
-  maxQuantity: number;
+  category: number;
 };
 
 type ProductEntry = {
   id: number;
+  product_id: number;
   title: string;
   quantity: number;
   created_at: string;
-  Created_by: string;
-  status: string;
-};
-
-type SoldProduct = {
-  product_name: string;
-  quantity: number;
-  created_at: string;
+  created_by: string;
+  transaction: string;
 };
 
 type Category = {
@@ -71,25 +68,45 @@ type Category = {
 export default function SummaryPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [productEntries, setProductEntries] = useState<ProductEntry[]>([]);
-  const [soldProducts, setSoldProducts] = useState<SoldProduct[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [title, setTitle] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
-  const [combinedData, setCombinedData] = useState<{ type: string; data: any }[]>([]);
-  const [filteredSales, setFilteredSales] = useState<SoldProduct[]>([]);
   const [dateRange, setDateRange] = useState<[Date, Date]>([
     new Date(new Date().setMonth(new Date().getMonth() - 1)),
     new Date(),
   ]);
+  const [inflowForm, setInflowForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    product_id: '',
+    source: '',
+    quantity: '',
+  });
+  const [outflowForm, setOutflowForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    product_id: '',
+    reason: '',
+    quantity: '',
+  });
+  const [productToDelete, setProductToDelete] = useState<number | null>(null);
+  const [availableQuantities, setAvailableQuantities] = useState<Record<number, number>>({});
 
   // Fetch Products List
   useEffect(() => {
     const fetchProducts = async () => {
-      const { data, error } = await supabase.from('product').select('id, title, maxQuantity');
+      const { data, error } = await supabase.from('product').select('id, title, category');
       if (error) console.error('Error fetching products:', error);
-      else setProducts(data || []);
+      else {
+        setProducts(data || []);
+        // Initialize available quantities
+        const quantities: Record<number, number> = {};
+        data?.forEach(product => {
+          quantities[product.id] = 0;
+        });
+        setAvailableQuantities(quantities);
+      }
     };
 
     fetchProducts();
@@ -106,91 +123,50 @@ export default function SummaryPage() {
     fetchCategories();
   }, []);
 
-  // Fetch Sold Products (from approved orders only)
-  const fetchSoldProducts = async () => {
-    try {
-      const { data: orderItems, error: orderItemsError } = await supabase
-        .from('order_item')
-        .select('order');
-
-      if (orderItemsError) {
-        console.error('Error fetching order items:', orderItemsError);
-        return;
-      }
-
-      if (!orderItems || orderItems.length === 0) {
-        console.log('No order items found.');
-        return;
-      }
-
-      const orderIds = [...new Set(orderItems.map((item) => item.order))];
-
-      const { data: approvedOrders, error: approvedOrdersError } = await supabase
-        .from('order')
-        .select('id')
-        .in('id', orderIds)
-        .eq('status', 'Approved');
-
-      if (approvedOrdersError) {
-        console.error('Error fetching approved orders:', approvedOrdersError);
-        return;
-      }
-
-      if (!approvedOrders || approvedOrders.length === 0) {
-        console.log('No approved orders found.');
-        return;
-      }
-
-      const approvedOrderIds = approvedOrders.map((order) => order.id);
-
-      const { data: validOrderItems, error: validOrderItemsError } = await supabase
-        .from('order_item')
-        .select('product, quantity, created_at')
-        .or(approvedOrderIds.map((id) => `order.eq.${id}`).join(','));
-
-      if (validOrderItemsError) {
-        console.error('Error fetching valid order items:', validOrderItemsError);
-        return;
-      }
-
-      if (!validOrderItems || validOrderItems.length === 0) {
-        console.log('No valid order items found.');
-        return;
-      }
-
-      const productIds = [...new Set(validOrderItems.map((item) => item.product))];
-      const { data: products, error: productsError } = await supabase
-        .from('product')
-        .select('id, title')
-        .in('id', productIds);
-
-      if (productsError) {
-        console.error('Error fetching product data:', productsError);
-        return;
-      }
-
-      const productMap = products.reduce((acc, product) => {
-        acc[product.id] = product.title;
-        return acc;
-      }, {});
-
-      const soldProductsArray = validOrderItems.map((orderItem) => ({
-        product_name: productMap[orderItem.product] || 'Unknown Product',
-        quantity: orderItem.quantity,
-        created_at: orderItem.created_at,
-      }));
-
-      setSoldProducts(soldProductsArray);
-      setFilteredSales(soldProductsArray);
-    } catch (error) {
-      console.error('Error in fetching sold products:', error);
-    }
-  };
-
-  // Fetch Sold Products on Component Mount
+  // Fetch Product Entries and calculate available quantities
   useEffect(() => {
-    fetchSoldProducts();
-  }, []);
+    const fetchProductEntries = async () => {
+      const { data, error } = await supabase
+        .from('product_entries')
+        .select('*');
+
+      if (error) {
+        console.error('Error fetching product entries:', error);
+        return;
+      }
+
+      setProductEntries(data || []);
+
+      // Calculate available quantities
+      const quantities: Record<number, number> = {};
+      products.forEach(product => {
+        quantities[product.id] = 0;
+      });
+
+      data?.forEach(entry => {
+        if (!quantities[entry.product_id]) quantities[entry.product_id] = 0;
+        quantities[entry.product_id] += entry.quantity;
+      });
+
+      setAvailableQuantities(quantities);
+    };
+
+    if (products.length > 0) {
+      fetchProductEntries();
+    }
+  }, [products]);
+
+  // Fetch Product Entries for a specific product
+  const fetchProductEntriesForProduct = async (productId: number) => {
+    const { data, error } = await supabase
+      .from('product_entries')
+      .select('*')
+      .eq('product_id', productId)
+      .order('created_at', { ascending: false });
+
+    if (error) console.error('Error fetching product entries:', error);
+    else setProductEntries(data || []);
+  };
 
   // Handle Add Product
   const handleAddProduct = async () => {
@@ -204,131 +180,186 @@ export default function SummaryPage() {
     setLoading(true);
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('product')
-        .insert([{ title, category: selectedCategory, maxQuantity: 0, slug }]);
+        .insert([{ title, category: selectedCategory, slug }])
+        .select();
 
       if (error) {
         console.error('Error adding product:', error);
         alert('Failed to add product.');
-      } else {
+      } else if (data) {
         alert('Beverage added successfully!');
-        window.location.reload();
+        setProducts(prev => [...prev, data[0]]);
+        setAvailableQuantities(prev => ({ ...prev, [data[0].id]: 0 }));
       }
     } catch (error) {
       console.error('Unexpected error:', error);
       alert('An unexpected error occurred.');
     } finally {
       setLoading(false);
+      setTitle('');
+      setSelectedCategory(null);
     }
   };
 
-  // Fetch Combined Data for a Specific Product
-  const fetchCombinedData = async (productId: number) => {
-    const { data: entries, error: entriesError } = await supabase
-      .from('product_entries')
-      .select('*')
-      .eq('product_id', productId);
+  // Handle Delete Product
+  const handleDeleteProduct = async () => {
+    if (!productToDelete) return;
 
-    if (entriesError) {
-      console.error('Error fetching product entries:', entriesError);
-      return;
+    setDeleteLoading(true);
+
+    try {
+      // First delete all related entries
+      const { error: entriesError } = await supabase
+        .from('product_entries')
+        .delete()
+        .eq('product_id', productToDelete);
+
+      if (entriesError) throw entriesError;
+
+      // Then delete the product
+      const { error: productError } = await supabase
+        .from('product')
+        .delete()
+        .eq('id', productToDelete);
+
+      if (productError) throw productError;
+
+      alert('Beverage deleted successfully!');
+      setProducts(prev => prev.filter(p => p.id !== productToDelete));
+      setProductToDelete(null);
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      alert('Failed to delete beverage. Please try again.');
+    } finally {
+      setDeleteLoading(false);
     }
-
-    const { data: soldItems, error: soldItemsError } = await supabase
-      .from('order_item')
-      .select('product, quantity, created_at')
-      .eq('product', productId);
-
-    if (soldItemsError) {
-      console.error('Error fetching sold products:', soldItemsError);
-      return;
-    }
-
-    const combined = [
-      ...(entries?.map((entry) => ({ type: 'Entry', data: entry })) || []),
-      ...(soldItems?.map((soldItem) => ({ type: 'Ordered', data: soldItem })) || []),
-    ];
-
-    setCombinedData(combined);
   };
 
-  // Handle Product Click
+  // Handle Product Click to view transactions
   const handleProductClick = async (productId: number) => {
     setSelectedProductId(productId);
-    await fetchCombinedData(productId);
+    await fetchProductEntriesForProduct(productId);
   };
 
   // Handle Date Range Change
   const handleDateRangeChange = (value: [Date, Date]) => {
     setDateRange(value);
-
-    const filtered = soldProducts.filter((sale) => {
-      const saleDate = new Date(sale.created_at);
-      return saleDate >= value[0] && saleDate <= value[1];
-    });
-
-    setFilteredSales(filtered);
   };
 
-  // Get Most Selling Products
-  const getMostSellingProducts = () => {
-    const productSales: { [key: string]: number } = {};
-
-    filteredSales.forEach((sale) => {
-      if (productSales[sale.product_name]) {
-        productSales[sale.product_name] += sale.quantity;
-      } else {
-        productSales[sale.product_name] = sale.quantity;
-      }
-    });
-
-    return Object.entries(productSales)
-      .map(([product, quantity]) => ({ product, quantity }))
-      .sort((a, b) => b.quantity - a.quantity);
+  // Handle Inflow Form Change
+  const handleInflowFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setInflowForm(prev => ({ ...prev, [name]: value }));
   };
 
-  // Get Sales Trends Over Time
-  const getSalesTrends = () => {
-    const trends: { [key: string]: number } = {};
-
-    filteredSales.forEach((sale) => {
-      const date = new Date(sale.created_at).toLocaleDateString();
-      if (trends[date]) {
-        trends[date] += sale.quantity;
-      } else {
-        trends[date] = sale.quantity;
-      }
-    });
-
-    return Object.entries(trends).map(([date, quantity]) => ({ date, quantity }));
+  // Handle Outflow Form Change
+  const handleOutflowFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setOutflowForm(prev => ({ ...prev, [name]: value }));
   };
 
-  // Pie Chart Data
-  const pieChartData = getMostSellingProducts().map((item) => ({
-    name: item.product,
-    value: item.quantity,
-  }));
-
-  // Pie Chart Colors
-  const COLORS = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
-
-  // Handle Approve Entry
-  const handleApproveEntry = async (entryId: number) => {
-    const { error } = await supabase
-      .from('product_entries')
-      .update({ status: 'Approved' })
-      .eq('id', entryId);
-
-    if (error) {
-      console.error('Error approving entry:', error);
-      alert('Failed to approve entry.');
-    } else {
-      alert('Entry approved successfully!');
-      if (selectedProductId) {
-        await fetchCombinedData(selectedProductId);
-      }
+  // Record Inflow Transaction
+  const recordInflow = async () => {
+    if (!inflowForm.product_id || !inflowForm.source || !inflowForm.quantity) {
+      alert('Please fill all fields');
+      return;
     }
+
+    const productId = Number(inflowForm.product_id);
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
+    try {
+      // Record the transaction
+      const { error: entryError } = await supabase
+        .from('product_entries')
+        .insert([{
+          product_id: productId,
+          title: product.title,
+          quantity: Number(inflowForm.quantity),
+          created_at: inflowForm.date,
+          created_by: 'Admin',
+          transaction: inflowForm.source,
+        }]);
+
+      if (entryError) throw entryError;
+
+      // Update available quantity locally
+      setAvailableQuantities(prev => ({
+        ...prev,
+        [productId]: (prev[productId] || 0) + Number(inflowForm.quantity)
+      }));
+
+      alert('Inflow recorded successfully!');
+      setInflowForm({
+        date: new Date().toISOString().split('T')[0],
+        product_id: '',
+        source: '',
+        quantity: '',
+      });
+    } catch (error) {
+      console.error('Error recording inflow:', error);
+      alert('Failed to record inflow');
+    }
+  };
+
+  // Record Outflow Transaction
+  const recordOutflow = async () => {
+    if (!outflowForm.product_id || !outflowForm.reason || !outflowForm.quantity) {
+      alert('Please fill all fields');
+      return;
+    }
+
+    const productId = Number(outflowForm.product_id);
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
+    const currentQuantity = availableQuantities[productId] || 0;
+    if (currentQuantity < Number(outflowForm.quantity)) {
+      alert('Not enough quantity available');
+      return;
+    }
+
+    try {
+      // Record the transaction
+      const { error: entryError } = await supabase
+        .from('product_entries')
+        .insert([{
+          product_id: productId,
+          title: product.title,
+          quantity: -Number(outflowForm.quantity), // Negative for outflow
+          created_at: outflowForm.date,
+          created_by: 'Admin',
+          transaction: outflowForm.reason,
+        }]);
+
+      if (entryError) throw entryError;
+
+      // Update available quantity locally
+      setAvailableQuantities(prev => ({
+        ...prev,
+        [productId]: (prev[productId] || 0) - Number(outflowForm.quantity)
+      }));
+
+      alert('Outflow recorded successfully!');
+      setOutflowForm({
+        date: new Date().toISOString().split('T')[0],
+        product_id: '',
+        reason: '',
+        quantity: '',
+      });
+    } catch (error) {
+      console.error('Error recording outflow:', error);
+      alert('Failed to record outflow');
+    }
+  };
+
+  // Get category name by ID
+  const getCategoryName = (categoryId: number) => {
+    const category = categories.find(c => c.id === categoryId);
+    return category ? category.name : 'Unknown';
   };
 
   return (
@@ -411,177 +442,110 @@ export default function SummaryPage() {
         </Dialog>
       </div>
 
-      {/* Inventory Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-        {products.map((product) => (
-          <div 
-            key={product.id} 
-            className="p-5 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow border border-gray-100"
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-800">{product.title}</h2>
-                <p className="text-gray-600 text-sm mt-1">EN: #{product.id.toString().padStart(4, '0')}</p>
-              </div>
-              <span className="text-2xl">📦</span>
-            </div>
-            <div className="mt-4 flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Available stock</p>
-                <p className="text-2xl font-bold text-indigo-600">{product.maxQuantity} boxes</p>
-              </div>
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button
-                    onClick={() => handleProductClick(product.id)}
-                    variant="outline"
-                    className="border-indigo-300 text-indigo-600 hover:bg-indigo-50 flex items-center gap-1"
-                  >
-                    <span>🔍</span>
-                    <span>Details</span>
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="rounded-lg max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                      <span>📊</span>
-                      <span>Transaction History for {product.title}</span>
-                    </DialogTitle>
-                  </DialogHeader>
-                  <div className="max-h-[400px] overflow-auto">
-                    <Table className="border-collapse">
-                      <TableHeader className="bg-gray-50">
-                        <TableRow>
-                          <TableHead className="font-medium text-gray-700">Type</TableHead>
-                          <TableHead className="font-medium text-gray-700">Quantity</TableHead>
-                          <TableHead className="font-medium text-gray-700">Date</TableHead>
-                          <TableHead className="font-medium text-gray-700">Created By</TableHead>
-                          <TableHead className="font-medium text-gray-700">Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {combinedData.map((item, index) => (
-                          <TableRow key={index} className="border-b border-gray-100 hover:bg-gray-50">
-                            <TableCell className={item.type === 'Entry' ? 'text-blue-600' : 'text-green-600'}>
-                              {item.type === 'Entry' ? '📥 Inbound' : '📤 Ordered'}
-                            </TableCell>
-                            <TableCell>{item.data.quantity}</TableCell>
-                            <TableCell>
-                              {new Date(item.data.created_at).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell>
-                              {item.type === 'Entry' ? item.data.Created_by : '-'}
-                            </TableCell>
-                            <TableCell>
-                              {item.type === 'Entry' && item.data.status === 'Pending' ? (
-                                <Button
-                                  variant="outline"
-                                  onClick={() => handleApproveEntry(item.data.id)}
-                                  className="border-green-500 text-green-600 hover:bg-green-50 flex items-center gap-1"
-                                >
-                                  <span>✅</span>
-                                  <span>Approve</span>
-                                </Button>
-                              ) : item.type === 'Entry' && item.data.status === 'Approved' ? (
-                                <span className="flex items-center gap-1 text-green-600">
-                                  <span>✔️</span>
-                                  <span>Approved</span>
-                                </span>
-                              ) : (
-                                '-'
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-        ))}
-      </div>
+
+      {/* Beverage Inventory Table */}
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>Beverage Inventory</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Beverage Name</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Available Quantity</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {products.map((product) => (
+                <TableRow key={product.id}>
+                  <TableCell className="font-medium">{product.title}</TableCell>
+                  <TableCell>{getCategoryName(product.category)}</TableCell>
+                  <TableCell>{availableQuantities[product.id] || 0}</TableCell>
+                  <TableCell className="flex gap-2">
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleProductClick(product.id)}
+                        >
+                          View Transactions
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-4xl">
+                        <DialogHeader>
+                          <DialogTitle>Transaction History for {product.title}</DialogTitle>
+                          <DialogDescription>
+                            Available Quantity: {availableQuantities[product.id] || 0}
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="max-h-[500px] overflow-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Date</TableHead>
+                                <TableHead>Reason/Source</TableHead>
+                                <TableHead>Quantity</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {productEntries
+                                .filter(entry => entry.product_id === product.id)
+                                .map((entry) => (
+                                  <TableRow key={entry.id}>
+                                    <TableCell>
+                                      {new Date(entry.created_at).toLocaleDateString()}
+                                    </TableCell>
+                                    <TableCell>{entry.transaction}</TableCell>
+                                    <TableCell className={entry.quantity > 0 ? 'text-green-600' : 'text-red-600'}>
+                                      {entry.quantity > 0 ? '+' : ''}{entry.quantity}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* Analytics Dashboard */}
       <div className="mb-8">
         <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
           <span>📈</span>
-          <span>Sales Analytics</span>
+          <span>Inventory Analytics</span>
         </h2>
-
-        {/* Date Range Picker */}
-        <div className="mb-6">
-          <Card className="border border-gray-200 rounded-xl overflow-hidden">
-            <CardHeader className="bg-gray-50 border-b border-gray-200">
-              <CardTitle className="flex items-center gap-2">
-                <span>📅</span>
-                <span>Select Date Range</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 flex justify-center">
-              <Calendar
-                onChange={handleDateRangeChange as any}
-                value={dateRange}
-                selectRange={true}
-                className="border-0 rounded-lg"
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Sales Table */}
-        <div className="mb-8">
-          <Card className="border border-gray-200 rounded-xl overflow-hidden">
-            <CardHeader className="bg-gray-50 border-b border-gray-200">
-              <CardTitle className="flex items-center gap-2">
-                <span>📋</span>
-                <span>Sales Records</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="max-h-[400px] overflow-auto">
-                <Table>
-                  <TableHeader className="bg-gray-50 sticky top-0">
-                    <TableRow>
-                      <TableHead className="font-medium text-gray-700">Beverage</TableHead>
-                      <TableHead className="font-medium text-gray-700">Quantity Sold</TableHead>
-                      <TableHead className="font-medium text-gray-700">Date</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredSales.map((sale, index) => (
-                      <TableRow key={index} className="hover:bg-gray-50">
-                        <TableCell className="font-medium">{sale.product_name}</TableCell>
-                        <TableCell>{sale.quantity} boxes</TableCell>
-                        <TableCell className="text-gray-600">
-                          {new Date(sale.created_at).toLocaleDateString()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
 
         {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Most Selling Products Bar Chart */}
+          {/* Inventory Levels Bar Chart */}
           <Card className="border border-gray-200 rounded-xl overflow-hidden">
             <CardHeader className="bg-gray-50 border-b border-gray-200">
               <CardTitle className="flex items-center gap-2">
-                <span>🏆</span>
-                <span>Top Selling Beverages</span>
+                <span>📊</span>
+                <span>Inventory Levels</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={getMostSellingProducts()}>
+                  <BarChart
+                    data={products.map(product => ({
+                      name: product.title,
+                      quantity: availableQuantities[product.id] || 0,
+                    }))}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="product" stroke="#6b7280" />
+                    <XAxis dataKey="name" stroke="#6b7280" />
                     <YAxis stroke="#6b7280" />
                     <Tooltip 
                       contentStyle={{ 
@@ -596,7 +560,7 @@ export default function SummaryPage() {
                       dataKey="quantity" 
                       fill="#6366F1" 
                       radius={[4, 4, 0, 0]}
-                      name="Boxes Sold"
+                      name="Available Quantity"
                     />
                   </BarChart>
                 </ResponsiveContainer>
@@ -604,66 +568,33 @@ export default function SummaryPage() {
             </CardContent>
           </Card>
 
-          {/* Sales Trends Line Chart */}
+          {/* Inventory Distribution Pie Chart */}
           <Card className="border border-gray-200 rounded-xl overflow-hidden">
             <CardHeader className="bg-gray-50 border-b border-gray-200">
               <CardTitle className="flex items-center gap-2">
-                <span>📊</span>
-                <span>Sales Trends</span>
+                <span>🍹</span>
+                <span>Inventory Distribution</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={getSalesTrends()}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="date" stroke="#6b7280" />
-                    <YAxis stroke="#6b7280" />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'white',
-                        borderColor: '#e5e7eb',
-                        borderRadius: '0.5rem',
-                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                      }}
-                    />
-                    <Legend />
-                    <Bar 
-                      dataKey="quantity" 
-                      fill="#10B981" 
-                      radius={[4, 4, 0, 0]}
-                      name="Daily Sales"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Pie Chart for Sales Distribution */}
-          <Card className="border border-gray-200 rounded-xl overflow-hidden lg:col-span-2">
-            <CardHeader className="bg-gray-50 border-b border-gray-200">
-              <CardTitle className="flex items-center gap-2">
-                <span>🍹</span>
-                <span>Beverage Sales Distribution</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="h-[400px]">
-                <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={pieChartData}
+                      data={products.map(product => ({
+                        name: product.title,
+                        value: availableQuantities[product.id] || 0,
+                      }))}
                       dataKey="value"
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      outerRadius={120}
+                      outerRadius={80}
                       fill="#8884d8"
                       label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                     >
-                      {pieChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      {products.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'][index % 5]} />
                       ))}
                     </Pie>
                     <Tooltip 
@@ -674,7 +605,7 @@ export default function SummaryPage() {
                         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
                       }}
                       formatter={(value, name, props) => [
-                        `${value} boxes`,
+                        `${value} units`,
                         name
                       ]}
                     />
