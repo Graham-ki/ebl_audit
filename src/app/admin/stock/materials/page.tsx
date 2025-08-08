@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -27,499 +28,356 @@ import {
 } from "@/components/ui/select";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase client
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 interface Material {
-  id?: string;
+  id: string;
   name: string;
-  amount_available: number;
-  unit: number;
-  cost: string;
-  amount_used?: number;
-}
-
-interface MaterialTransaction {
-  date: string;
-  inflow: number;
-  outflow: number;
-  damages: number;
+  quantity_available: number;
 }
 
 interface MaterialEntry {
-  id: number;
+  id: string;
   material_id: string;
   quantity: number;
-  damage: number;
   action: string;
   date: string;
-  created_by: string;
+  created_at: string;
 }
 
-interface MaterialEntryWithName extends MaterialEntry {
-  material_name: string;
-}
-
-interface ProductEntry {
-  id: number;
+interface SupplyItem {
+  id: string;
+  name: string;
   quantity: number;
   created_at: string;
 }
 
-interface MaterialUsage {
+interface MaterialTransaction {
+  id: string;
   date: string;
-  boxes: number;
-  bottles: number;
-  labels: number;
-  spirit: number;
-  flavor: number;
+  type: "inflow" | "outflow";
+  quantity: number;
+  action: string;
+  material_id: string;
+  material_name: string;
+}
+
+interface OutflowFormData {
+  material_id: string;
+  action: "Damaged" | "Sold" | "Used in production";
+  quantity: number;
+  date: string;
 }
 
 const MaterialsPage = () => {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editMaterial, setEditMaterial] = useState<Material | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [isViewDetailsOpen, setIsViewDetailsOpen] = useState(false);
+  const [isOutflowDialogOpen, setIsOutflowDialogOpen] = useState(false);
   const [viewMaterial, setViewMaterial] = useState<Material | null>(null);
-  const [materialTransactions, setMaterialTransactions] = useState<MaterialTransaction[]>([]);
-  const [materialEntries, setMaterialEntries] = useState<MaterialEntryWithName[]>([]);
-  const [productEntries, setProductEntries] = useState<ProductEntry[]>([]);
-  const [materialUsage, setMaterialUsage] = useState<MaterialUsage[]>([]);
-  const [filter, setFilter] = useState("all");
-  const [customDate, setCustomDate] = useState("");
-
-  const [newMaterial, setNewMaterial] = useState<Material>({
+  const [allTransactions, setAllTransactions] = useState<MaterialTransaction[]>([]);
+  const [materialQuantities, setMaterialQuantities] = useState<Record<string, number>>({});
+  const [newMaterial, setNewMaterial] = useState<Omit<Material, "id">>({
     name: "",
-    amount_available: 0,
-    unit: 0,
-    cost: "",
+    quantity_available: 0,
+  });
+  const [outflowForm, setOutflowForm] = useState<OutflowFormData>({
+    material_id: "",
+    action: "Damaged",
+    quantity: 0,
+    date: new Date().toISOString().split("T")[0],
   });
 
   useEffect(() => {
-    fetchMaterials();
-    fetchMaterialEntries();
-    fetchProductEntries();
-  }, [filter, customDate]);
+    fetchAllData();
+  }, []);
 
   useEffect(() => {
-    if (productEntries.length > 0) {
-      calculateMaterialUsage();
+    if (viewMaterial) {
+      fetchMaterialTransactions(viewMaterial.id);
     }
-  }, [productEntries]);
+  }, [viewMaterial]);
 
-  const fetchMaterials = async () => {
+  const fetchAllData = async () => {
     setLoading(true);
-    const { data: materialsData, error } = await supabase
-      .from("materials")
-      .select("id, amount_available, unit, name, cost");
-    if (error) {
-      console.error("Error fetching materials:", error);
-    } else {
+    try {
+      // Fetch materials
+      const { data: materialsData, error: materialsError } = await supabase
+        .from("materials")
+        .select("id, name, quantity_available")
+        .order("name", { ascending: true });
+
+      if (materialsError) throw materialsError;
+
+      // Fetch all supply items (inflows)
+      const { data: supplyItems, error: supplyItemsError } = await supabase
+        .from("supply_items")
+        .select("id, name, quantity, created_at");
+
+      if (supplyItemsError) throw supplyItemsError;
+
+      // Fetch all material entries (outflows)
+      const { data: outflows, error: outflowError } = await supabase
+        .from("material_entries")
+        .select("id, material_id, quantity, action, date, created_at");
+
+      if (outflowError) throw outflowError;
+
+      // Combine all transactions
+      const inflowTransactions: MaterialTransaction[] = (supplyItems || []).map((item) => ({
+        id: item.id,
+        date: new Date(item.created_at).toLocaleDateString(),
+        type: "inflow",
+        quantity: item.quantity,
+        action: "Purchased",
+        material_id: materialsData?.find(m => m.name === item.name)?.id || "",
+        material_name: item.name,
+      }));
+
+      const outflowTransactions: MaterialTransaction[] = (outflows || []).map((entry) => ({
+        id: entry.id,
+        date: new Date(entry.date).toLocaleDateString(),
+        type: "outflow",
+        quantity: entry.quantity,
+        action: entry.action,
+        material_id: entry.material_id,
+        material_name: materialsData?.find(m => m.id === entry.material_id)?.name || "",
+      }));
+
+      const combinedTransactions = [...inflowTransactions, ...outflowTransactions];
+      setAllTransactions(combinedTransactions);
+
+      // Calculate quantities for each material
+      const quantities: Record<string, number> = {};
+      materialsData?.forEach(material => {
+        const materialTransactions = combinedTransactions.filter(
+          t => t.material_id === material.id
+        );
+        const totalInflow = materialTransactions
+          .filter(t => t.type === "inflow")
+          .reduce((sum, t) => sum + t.quantity, 0);
+        const totalOutflow = materialTransactions
+          .filter(t => t.type === "outflow")
+          .reduce((sum, t) => sum + t.quantity, 0);
+        quantities[material.id] = totalInflow - totalOutflow;
+      });
+
+      setMaterialQuantities(quantities);
       setMaterials(materialsData || []);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  const fetchMaterialEntries = async () => {
-    let query = supabase
-      .from("material_entries")
-      .select("id, material_id, quantity, damage, action, date, created_by");
+  const fetchMaterialTransactions = async (materialId: string) => {
+    if (!viewMaterial) return;
 
-    if (filter === "daily") {
-      const today = new Date().toISOString().split("T")[0];
-      query = query.gte("date", today);
-    } else if (filter === "monthly") {
-      const firstDayOfMonth = new Date();
-      firstDayOfMonth.setDate(1);
-      query = query.gte("date", firstDayOfMonth.toISOString());
-    } else if (filter === "yearly") {
-      const firstDayOfYear = new Date(new Date().getFullYear(), 0, 1);
-      query = query.gte("date", firstDayOfYear.toISOString());
-    } else if (filter === "custom" && customDate) {
-      query = query.eq("date", customDate);
-    }
+    const materialTransactions = allTransactions.filter(
+      t => t.material_id === materialId
+    );
 
-    const { data: entries, error: entriesError } = await query;
-    if (entriesError) {
-      console.error("Error fetching material entries:", entriesError);
-      return;
-    }
+    // Sort by date (newest first)
+    const sortedTransactions = [...materialTransactions].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
 
-    const materialIds = [...new Set(entries.map((entry) => entry.material_id))];
-    const { data: materials, error: materialsError } = await supabase
-      .from("materials")
-      .select("id, name")
-      .in("id", materialIds);
-
-    if (materialsError) {
-      console.error("Error fetching materials:", materialsError);
-      return;
-    }
-
-    const mergedEntries: MaterialEntryWithName[] = entries.map((entry) => ({
-      ...entry,
-      material_name: materials.find((m) => m.id === entry.material_id)?.name || "Unknown",
-    }));
-
-    setMaterialEntries(mergedEntries);
-  };
-
-  const fetchProductEntries = async () => {
-    let query = supabase
-      .from("product_entries")
-      .select("id, quantity, created_at");
-
-    if (filter === "daily") {
-      const today = new Date().toISOString().split("T")[0];
-      query = query.gte("created_at", today);
-    } else if (filter === "monthly") {
-      const firstDayOfMonth = new Date();
-      firstDayOfMonth.setDate(1);
-      query = query.gte("created_at", firstDayOfMonth.toISOString());
-    } else if (filter === "yearly") {
-      const firstDayOfYear = new Date(new Date().getFullYear(), 0, 1);
-      query = query.gte("created_at", firstDayOfYear.toISOString());
-    } else if (filter === "custom" && customDate) {
-      query = query.eq("created_at", customDate);
-    }
-
-    const { data: entries, error } = await query;
-    if (error) {
-      console.error("Error fetching product entries:", error);
-      return;
-    }
-
-    setProductEntries(entries || []);
-  };
-
-  const calculateMaterialUsage = () => {
-    const groupedByDate: Record<string, ProductEntry[]> = {};
-    
-    productEntries.forEach(entry => {
-      const date = new Date(entry.created_at).toLocaleDateString();
-      if (!groupedByDate[date]) {
-        groupedByDate[date] = [];
-      }
-      groupedByDate[date].push(entry);
-    });
-
-    const usageData: MaterialUsage[] = Object.entries(groupedByDate).map(([date, entries]) => {
-      const totalBoxes = entries.reduce((sum, entry) => sum + entry.quantity, 0);
-      
-      return {
-        date,
-        boxes: totalBoxes,
-        bottles: totalBoxes * 24,
-        labels: totalBoxes * 24,
-        spirit: parseFloat((totalBoxes * 0.4).toFixed(2)),
-        flavor: parseFloat((totalBoxes * 0.17).toFixed(2))
-      };
-    });
-
-    setMaterialUsage(usageData);
+    return sortedTransactions;
   };
 
   const handleAddMaterial = async () => {
-    const { name, amount_available, unit, cost } = newMaterial;
-    if (!name || amount_available < 0 || unit < 0) {
-      alert("Please enter valid details.");
+    if (!newMaterial.name) {
+      alert("Please enter a material name");
       return;
     }
 
-    const { error } = await supabase.from("materials").insert([{ name, amount_available, unit, cost }]);
+    const { data, error } = await supabase
+      .from("materials")
+      .insert([newMaterial])
+      .select();
+
     if (error) {
       console.error("Error adding material:", error);
-      alert("Failed to add material.");
+      alert("Failed to add material");
       return;
     }
 
-    setIsAdding(false);
-    setNewMaterial({ name: "", amount_available: 0, unit: 0, cost: "" });
-    fetchMaterials();
-    alert("✅ Material added successfully!");
+    if (data?.[0]) {
+      setMaterials([...materials, data[0]]);
+      setIsAdding(false);
+      setNewMaterial({ name: "", quantity_available: 0 });
+      fetchAllData(); // Refresh all data to include the new material
+    }
   };
 
-  const handleEditMaterial = (material: Material) => {
-    setEditMaterial(material);
-    setIsEditing(true);
-  };
+  const handleRecordOutflow = async () => {
+    if (!outflowForm.material_id || outflowForm.quantity <= 0) {
+      alert("Please fill all required fields");
+      return;
+    }
 
-  const handleUpdateMaterial = async () => {
-    if (!editMaterial) return;
-
-    const { id, name, amount_available, unit, cost } = editMaterial;
-    const { error } = await supabase
-      .from("materials")
-      .update({ name, amount_available, unit, cost })
-      .eq("id", id);
+    const { error } = await supabase.from("material_entries").insert([
+      {
+        material_id: outflowForm.material_id,
+        quantity: outflowForm.quantity,
+        action: outflowForm.action,
+        date: outflowForm.date,
+      },
+    ]);
 
     if (error) {
-      console.error("Error updating material:", error);
-      alert("Failed to update material.");
+      console.error("Error recording outflow:", error);
+      alert("Failed to record outflow");
       return;
     }
 
-    setIsEditing(false);
-    fetchMaterials();
-    alert("✏️ Material updated successfully!");
+    // Refresh all data to update quantities
+    fetchAllData();
+    setIsOutflowDialogOpen(false);
+    setOutflowForm({
+      material_id: "",
+      action: "Damaged",
+      quantity: 0,
+      date: new Date().toISOString().split("T")[0],
+    });
   };
 
   const handleDeleteMaterial = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this material?")) return;
+
+    // First delete related entries
+    await supabase.from("material_entries").delete().eq("material_id", id);
+
+    // Then delete the material
     const { error } = await supabase.from("materials").delete().eq("id", id);
+
     if (error) {
       console.error("Error deleting material:", error);
-      alert("Failed to delete material.");
-      return;
-    }
-    fetchMaterials();
-    alert("🗑️ Material deleted successfully!");
-  };
-
-  const handleViewDetails = async (material: Material) => {
-    setViewMaterial(material);
-    setIsViewDetailsOpen(true);
-
-    const { data: entries, error } = await supabase
-      .from("material_entries")
-      .select("*")
-      .eq("material_id", material.id)
-      .order("date", { ascending: true });
-
-    if (error) {
-      console.error("Error fetching material entries:", error);
+      alert("Failed to delete material");
       return;
     }
 
-    const transactions: MaterialTransaction[] = entries?.map(entry => {
-      const date = new Date(entry.date).toLocaleDateString();
-      
-      let inflow = 0;
-      let outflow = 0;
-      let damages = 0;
-
-      if (entry.action === "Received from store") {
-        inflow = entry.quantity;
-      } else if (entry.action === "Used in production" || entry.action === "Sold") {
-        outflow = entry.quantity;
-        damages = entry.damage || 0;
-      }
-
-      return {
-        date,
-        inflow,
-        outflow,
-        damages
-      };
-    }) || [];
-
-    setMaterialTransactions(transactions);
+    setMaterials(materials.filter((m) => m.id !== id));
+    fetchAllData(); // Refresh data after deletion
   };
 
   return (
     <div className="container mx-auto p-6">
-      <h1 className="text-4xl font-bold text-center mb-8 bg-gradient-to-r from-blue-200 to-purple-200 text-blue-900 p-4 rounded-xl shadow-md">
-        📦 Materials Management
-      </h1>
-      
+      <h1 className="text-3xl font-bold mb-6">Materials Inventory</h1>
+
+      <div className="mb-6 flex justify-between items-center">
+        <div className="text-gray-600">
+          Total Materials: {materials.length}
+        </div>
+        <Button onClick={() => setIsAdding(false)}>All Materials</Button>
+      </div>
+
       {loading ? (
-        <p className="text-center">Loading materials...</p>
+        <div className="text-center py-8">Loading materials...</div>
       ) : (
-        <Table className="rounded-xl border shadow-sm bg-white">
+        <Table className="border rounded-lg">
           <TableHeader>
-            <TableRow className="bg-blue-50">
-              <TableHead className="text-center">Name</TableHead>
-              <TableHead className="text-center">Unit Cost(UGX)</TableHead>
-              <TableHead className="text-center">Actions</TableHead>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead className="text-right">Quantity Available</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {materials.length > 0 ? (
               materials.map((material) => (
                 <TableRow key={material.id}>
-                  <TableCell className="text-center">{material.name}</TableCell>
-                  <TableCell className="text-center">{material.cost}</TableCell>
-                  <TableCell className="text-center flex justify-center gap-2">
-                    <Button size="sm" onClick={() => handleViewDetails(material)}>📄 Details</Button>
+                  <TableCell>{material.name}</TableCell>
+                  <TableCell className="text-right">
+                    {materialQuantities[material.id] || 0}
+                  </TableCell>
+                  <TableCell className="text-right space-x-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setViewMaterial(material);
+                        setIsViewDetailsOpen(true);
+                      }}
+                    >
+                      Details
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={3} className="text-center py-4">No materials found.</TableCell>
+                <TableCell colSpan={3} className="text-center py-4">
+                  No materials found
+                </TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
       )}
-
-      {/* Add Material Dialog */}
-      <Dialog open={isAdding} onOpenChange={setIsAdding}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>➕ Add New Material</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Input placeholder="Material Name" value={newMaterial.name} onChange={(e) => setNewMaterial({ ...newMaterial, name: e.target.value })} />
-            <Input placeholder="Unit Cost" value={newMaterial.cost} onChange={(e) => setNewMaterial({ ...newMaterial, cost: e.target.value })} />
-            <Input type="number" placeholder="Amount Available" value={newMaterial.amount_available || ""} onChange={(e) => setNewMaterial({ ...newMaterial, amount_available: parseFloat(e.target.value) })} />
-            <Input type="number" placeholder="Unit Per Box" value={newMaterial.unit || ""} onChange={(e) => setNewMaterial({ ...newMaterial, unit: parseFloat(e.target.value) })} />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setIsAdding(false)}>Cancel</Button>
-            <Button onClick={handleAddMaterial}>Add</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Material Dialog */}
-      <Dialog open={isEditing} onOpenChange={setIsEditing}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>✏️ Edit Material</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Input placeholder="Material Name" value={editMaterial?.name || ""} onChange={(e) => setEditMaterial({ ...editMaterial!, name: e.target.value })} />
-            <Input placeholder="Cost" value={editMaterial?.cost || ""} onChange={(e) => setEditMaterial({ ...editMaterial!, cost: e.target.value })} />
-            <Input type="number" placeholder="Amount Available" value={editMaterial?.amount_available || 0} onChange={(e) => setEditMaterial({ ...editMaterial!, amount_available: +e.target.value })} />
-            <Input type="number" placeholder="Unit Per Box" value={editMaterial?.unit || 0} onChange={(e) => setEditMaterial({ ...editMaterial!, unit: +e.target.value })} />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setIsEditing(false)}>Cancel</Button>
-            <Button onClick={handleUpdateMaterial}>Update</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* View Details Dialog */}
+      {/* Material Details Dialog */}
       <Dialog open={isViewDetailsOpen} onOpenChange={setIsViewDetailsOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>📊 Material Transactions - {viewMaterial?.name}</DialogTitle>
+            <DialogTitle>
+              Transactions for {viewMaterial?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Quantity Available: {materialQuantities[viewMaterial?.id || ""] || 0}
+            </DialogDescription>
           </DialogHeader>
           <div className="max-h-[500px] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Inflow</TableHead>
-                  <TableHead className="text-right">Outflow</TableHead>
-                  <TableHead className="text-right">Damages</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Quantity</TableHead>
+                  <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {materialTransactions.length > 0 ? (
-                  materialTransactions.map((transaction, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{transaction.date}</TableCell>
-                      <TableCell className="text-right text-green-600">
-                        {transaction.inflow > 0 ? transaction.inflow : '-'}
-                      </TableCell>
-                      <TableCell className="text-right text-red-600">
-                        {transaction.outflow > 0 ? transaction.outflow : '-'}
-                      </TableCell>
-                      <TableCell className="text-right text-orange-600">
-                        {transaction.damages > 0 ? transaction.damages : '-'}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                {allTransactions.filter(t => t.material_id === viewMaterial?.id).length > 0 ? (
+                  allTransactions
+                    .filter(t => t.material_id === viewMaterial?.id)
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map((transaction) => (
+                      <TableRow key={transaction.id}>
+                        <TableCell>{transaction.date}</TableCell>
+                        <TableCell>
+                          <span
+                            className={`px-2 py-1 rounded ${
+                              transaction.type === "inflow"
+                                ? "bg-green-100 text-green-800"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {transaction.type}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {transaction.quantity}
+                        </TableCell>
+                        <TableCell>{transaction.action}</TableCell>
+                      </TableRow>
+                    ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-4">No transaction data available</TableCell>
+                    <TableCell colSpan={4} className="text-center py-4">
+                      No transactions found
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
           </div>
-          <DialogFooter>
-            <Button onClick={() => setIsViewDetailsOpen(false)}>Close</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Material Usage Section */}
-      <div className="mt-12">
-        <h2 className="text-2xl font-semibold mb-4">📊 Material Usage</h2>
-        <div className="flex gap-2 mb-4">
-          <Select onValueChange={setFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="daily">Daily</SelectItem>
-              <SelectItem value="monthly">Monthly</SelectItem>
-              <SelectItem value="yearly">Yearly</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
-            </SelectContent>
-          </Select>
-          {filter === "custom" && (
-            <Input type="date" value={customDate} onChange={(e) => setCustomDate(e.target.value)} />
-          )}
-        </div>
-
-        <Table className="bg-white rounded-xl shadow-md mb-8">
-          <TableHeader>
-            <TableRow className="bg-blue-50">
-              <TableHead>Date</TableHead>
-              <TableHead className="text-right">Boxes</TableHead>
-              <TableHead className="text-right">Bottles</TableHead>
-              <TableHead className="text-right">Labels</TableHead>
-              <TableHead className="text-right">Spirit (L)</TableHead>
-              <TableHead className="text-right">Flavor (L)</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {materialUsage.length > 0 ? (
-              materialUsage.map((usage, index) => (
-                <TableRow key={index}>
-                  <TableCell>{usage.date}</TableCell>
-                  <TableCell className="text-right">{usage.boxes}</TableCell>
-                  <TableCell className="text-right">{usage.bottles}</TableCell>
-                  <TableCell className="text-right">{usage.labels}</TableCell>
-                  <TableCell className="text-right">{usage.spirit}</TableCell>
-                  <TableCell className="text-right">{usage.flavor}</TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-4">No material usage data available</TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Material Entries Section */}
-      <div className="mt-8">
-        <h2 className="text-2xl font-semibold mb-4">📘 Material Entries</h2>
-        <Table className="bg-white rounded-xl shadow-md">
-          <TableHeader>
-            <TableRow className="bg-blue-50">
-              <TableHead>Material</TableHead>
-              <TableHead>Quantity</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Created By</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {materialEntries.map((entry) => (
-              <TableRow key={entry.id}>
-                <TableCell>{entry.material_name}</TableCell>
-                <TableCell>{entry.quantity}</TableCell>
-                <TableCell>{entry.action}</TableCell>
-                <TableCell>{new Date(entry.date).toLocaleDateString()}</TableCell>
-                <TableCell>{entry.created_by}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
     </div>
   );
 };
