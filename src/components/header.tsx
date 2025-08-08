@@ -23,7 +23,6 @@ import { debounce } from 'lodash';
 const NAV_LINKS = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: <Package2 className="h-4 w-4" /> },
   { href: '/admin/stock', label: 'Stock', icon: <Package2 className="h-4 w-4" /> },
-  { href: '/admin/users', label: 'Marketers', icon: <CircleUser className="h-4 w-4" /> },
   { href: '/admin/suppliers', label: 'Suppliers', icon: <CircleUser className="h-4 w-4" /> },
   { href: '/admin/ledgers', label: 'Finances', icon: <Package2 className="h-4 w-4" /> },
   { href: '/admin/analytics', label: 'Analytics', icon: <Package2 className="h-4 w-4" /> },
