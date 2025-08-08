@@ -23,6 +23,7 @@ interface SupplyItem {
   name: string;
   quantity: number;
   price: number;
+  purchase_date: string;
   created_at: string;
 }
 
@@ -74,6 +75,7 @@ export default function Suppliers() {
     name: "",
     quantity: 0,
     price: 0,
+    purchase_date: new Date().toISOString().split('T')[0],
   });
   
   const [deliveryForm, setDeliveryForm] = useState<Omit<Delivery, "id" | "created_at">>({
@@ -233,7 +235,11 @@ export default function Suppliers() {
       
       const { data, error } = await supabase
         .from('supply_items')
-        .insert([{ ...itemForm, supplier_id: selectedSupplier.id }])
+        .insert([{ 
+          ...itemForm, 
+          supplier_id: selectedSupplier.id,
+          purchase_date: itemForm.purchase_date || new Date().toISOString().split('T')[0]
+        }])
         .select();
 
       if (error) throw error;
@@ -391,6 +397,7 @@ export default function Suppliers() {
       name: "",
       quantity: 0,
       price: 0,
+      purchase_date: new Date().toISOString().split('T')[0],
     });
     setShowItemForm(false);
   };
@@ -438,10 +445,10 @@ export default function Suppliers() {
             <p className="text-gray-600">Manage your service providers and their supplies</p>
           </div>
           <button
-            onClick={() => setShowSupplierForm(false)}
+            onClick={() => setShowSupplierForm(true)}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm"
           >
-            <span>All</span> Suppliers
+            <span>+</span> Add new
           </button>
         </div>
       </header>
@@ -461,10 +468,10 @@ export default function Suppliers() {
             <h3 className="text-lg font-medium text-gray-900 mb-1">No data yet</h3>
             <p className="text-gray-500 mb-4">Get started by adding your first service provider</p>
             <button
-              onClick={() => setShowSupplierForm(false)}
+              onClick={() => setShowSupplierForm(true)}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
-              All Suppliers will appear here!
+              Add new
             </button>
           </div>
         ) : (
@@ -518,6 +525,12 @@ export default function Suppliers() {
                         >
                           <span>📦</span> View Supplies
                         </button>
+                        <button 
+                          onClick={() => handleDeleteSupplier(supplier.id)}
+                          className="px-3 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 flex items-center gap-1"
+                        >
+                          <span>🗑️</span> Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -527,6 +540,88 @@ export default function Suppliers() {
           </div>
         )}
       </div>
+
+      {/* Supplier Form Modal */}
+      {showSupplierForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Add New Supplier
+                </h3>
+                <button 
+                  onClick={resetSupplierForm}
+                  className="text-gray-400 hover:text-gray-500"
+                >
+                  ✕
+                </button>
+              </div>
+              <form onSubmit={handleSupplierSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={supplierForm.name}
+                    onChange={(e) => setSupplierForm({...supplierForm, name: e.target.value})}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Contact
+                  </label>
+                  <input
+                    type="text"
+                    name="contact"
+                    value={supplierForm.contact}
+                    onChange={(e) => setSupplierForm({...supplierForm, contact: e.target.value})}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Address
+                  </label>
+                  <input
+                    type="text"
+                    name="address"
+                    value={supplierForm.address}
+                    onChange={(e) => setSupplierForm({...supplierForm, address: e.target.value})}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                {error && (
+                  <div className="p-2 bg-red-100 text-red-700 text-sm rounded-lg">
+                    {error}
+                  </div>
+                )}
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={resetSupplierForm}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    Save Supplier
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Supplies Table Modal */}
       {showSuppliesModal && selectedSupplier && (
@@ -542,13 +637,14 @@ export default function Suppliers() {
                     onClick={() => {
                       setItemForm({
                         ...itemForm,
-                        supplier_id: selectedSupplier.id
+                        supplier_id: selectedSupplier.id,
+                        purchase_date: new Date().toISOString().split('T')[0]
                       });
                       setShowItemForm(true);
                     }}
                     className="px-3 py-1 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-1"
                   >
-                    <span>All</span> Items
+                    <span>+</span> Add Item
                   </button>
                   <button 
                     onClick={() => setShowSuppliesModal(false)}
@@ -645,7 +741,36 @@ export default function Suppliers() {
                                   className="text-purple-600 hover:text-purple-900"
                                 >
                                   View Details
-                                </button> 
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSelectedItem(item);
+                                    setShowDeliveryForm(true);
+                                  }}
+                                  className="text-green-600 hover:text-green-900"
+                                >
+                                  Record Delivery
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSelectedItem(item);
+                                    setPaymentForm({
+                                      ...paymentForm,
+                                      supply_item_id: item.id,
+                                      amount: Math.min(item.price * item.quantity - totalPaid, item.price * item.quantity)
+                                    });
+                                    setShowPaymentForm(true);
+                                  }}
+                                  className="text-blue-600 hover:text-blue-900"
+                                >
+                                  Record Payment
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteItem(item.id)}
+                                  className="text-red-600 hover:text-red-900"
+                                >
+                                  Delete
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -732,6 +857,361 @@ export default function Suppliers() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Item Form Modal */}
+      {showItemForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Add New Item
+                </h3>
+                <button 
+                  onClick={resetItemForm}
+                  className="text-gray-400 hover:text-gray-500"
+                >
+                  ✕
+                </button>
+              </div>
+              <form onSubmit={handleItemSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Item Name
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={itemForm.name}
+                    onChange={(e) => setItemForm({...itemForm, name: e.target.value})}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Purchase Date
+                  </label>
+                  <input
+                    type="date"
+                    name="purchase_date"
+                    value={itemForm.purchase_date}
+                    onChange={(e) => setItemForm({...itemForm, purchase_date: e.target.value})}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Quantity Ordered
+                    </label>
+                    <input
+                      type="number"
+                      name="quantity"
+                      value={itemForm.quantity}
+                      onChange={(e) => setItemForm({...itemForm, quantity: Number(e.target.value)})}
+                      required
+                      min="1"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Unit Price (UGX)
+                    </label>
+                    <input
+                      type="number"
+                      name="price"
+                      value={itemForm.price}
+                      onChange={(e) => setItemForm({...itemForm, price: Number(e.target.value)})}
+                      required
+                      min="0"
+                      step="0.01"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 p-3 rounded-lg">
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Total Cost:</span>
+                    <span className="font-medium">
+                      {formatCurrency((itemForm.quantity || 0) * (itemForm.price || 0))}
+                    </span>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="p-2 bg-red-100 text-red-700 text-sm rounded-lg">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={resetItemForm}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    Save Item
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delivery Form Modal */}
+      {showDeliveryForm && selectedItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Record Delivery for {selectedItem.name}
+                </h3>
+                <button 
+                  onClick={resetDeliveryForm}
+                  className="text-gray-400 hover:text-gray-500"
+                >
+                  ✕
+                </button>
+              </div>
+              <form onSubmit={handleDeliverySubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantity Delivered
+                  </label>
+                  <input
+                    type="number"
+                    name="quantity"
+                    value={deliveryForm.quantity}
+                    onChange={(e) => setDeliveryForm({...deliveryForm, quantity: Number(e.target.value)})}
+                    required
+                    min="1"
+                    max={selectedItem.quantity - getTotalDelivered(selectedItem.id)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Delivery Date
+                  </label>
+                  <input
+                    type="date"
+                    name="delivery_date"
+                    value={deliveryForm.delivery_date}
+                    onChange={(e) => setDeliveryForm({...deliveryForm, delivery_date: e.target.value})}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Notes (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    name="notes"
+                    value={deliveryForm.notes || ''}
+                    onChange={(e) => setDeliveryForm({...deliveryForm, notes: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="bg-blue-50 p-3 rounded-lg">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-sm font-medium">Previously Delivered:</span>
+                      <div className="font-medium">
+                        {getTotalDelivered(selectedItem.id)}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium">Pending After This:</span>
+                      <div className={`font-medium ${
+                        (selectedItem.quantity - getTotalDelivered(selectedItem.id) - deliveryForm.quantity) > 0 
+                          ? 'text-yellow-600' 
+                          : 'text-green-600'
+                      }`}>
+                        {selectedItem.quantity - getTotalDelivered(selectedItem.id) - deliveryForm.quantity}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="p-2 bg-red-100 text-red-700 text-sm rounded-lg">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={resetDeliveryForm}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    Record Delivery
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Form Modal */}
+      {showPaymentForm && selectedItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Record Payment for {selectedItem.name}
+                </h3>
+                <button 
+                  onClick={resetPaymentForm}
+                  className="text-gray-400 hover:text-gray-500"
+                >
+                  ✕
+                </button>
+              </div>
+              <form onSubmit={handlePaymentSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Amount (UGX)
+                  </label>
+                  <input
+                    type="number"
+                    name="amount"
+                    value={paymentForm.amount}
+                    onChange={(e) => setPaymentForm({...paymentForm, amount: Number(e.target.value)})}
+                    required
+                    min="0"
+                    step="0.01"
+                    max={selectedItem.quantity * selectedItem.price - getTotalPaid(selectedItem.id)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Payment Date
+                  </label>
+                  <input
+                    type="date"
+                    name="payment_date"
+                    value={paymentForm.payment_date}
+                    onChange={(e) => setPaymentForm({...paymentForm, payment_date: e.target.value})}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Payment Method
+                  </label>
+                  <select
+                    name="method"
+                    value={paymentForm.method}
+                    onChange={(e) => setPaymentForm({...paymentForm, method: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="bank">Bank Transfer</option>
+                    <option value="mobile_money">Mobile Money</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Reference (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    name="reference"
+                    value={paymentForm.reference || ''}
+                    onChange={(e) => setPaymentForm({...paymentForm, reference: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="bg-blue-50 p-3 rounded-lg">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-sm font-medium">Total Cost:</span>
+                      <div className="font-medium">
+                        {formatCurrency(selectedItem.quantity * selectedItem.price)}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium">Previously Paid:</span>
+                      <div className="font-medium">
+                        {formatCurrency(getTotalPaid(selectedItem.id))}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium">Balance After This:</span>
+                      <div className={`font-medium ${
+                        (selectedItem.quantity * selectedItem.price - getTotalPaid(selectedItem.id) - paymentForm.amount) > 0 
+                          ? 'text-red-600' 
+                          : 'text-green-600'
+                      }`}>
+                        {formatCurrency(
+                          selectedItem.quantity * selectedItem.price - getTotalPaid(selectedItem.id) - paymentForm.amount
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="p-2 bg-red-100 text-red-700 text-sm rounded-lg">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={resetPaymentForm}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    Record Payment
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
