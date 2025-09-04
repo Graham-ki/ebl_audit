@@ -106,17 +106,12 @@ const MaterialsPage = () => {
         .order("name", { ascending: true });
       if (materialsError) throw materialsError;
 
-      // Fetch deliveries (inflows)
+      // Fetch deliveries (inflows) with 'Stock' notes
       const { data: deliveriesData = [], error: deliveriesError } = await supabase
         .from("deliveries")
-        .select("id, supply_item_id, quantity, delivery_date");
+        .select("id, material_id, quantity, delivery_date, notes")
+        .eq("notes", "Stock");
       if (deliveriesError) throw deliveriesError;
-
-      // Fetch supply items
-      const { data: supplyItemsData = [], error: supplyItemsError } = await supabase
-        .from("supply_items")
-        .select("id, name");
-      if (supplyItemsError) throw supplyItemsError;
 
       // Fetch outflows
       const { data: outflows = [], error: outflowError } = await supabase
@@ -136,15 +131,14 @@ const MaterialsPage = () => {
       // Process transactions
       const inflowTransactions: MaterialTransaction[] = deliveriesData
         .map(delivery => {
-          const supplyItem = supplyItemsData.find(si => si.id === delivery.supply_item_id);
-          const material = materialsData.find(m => m.name === supplyItem?.name);
+          const material = materialsData.find(m => m.id === delivery.material_id);
           if (!material) return null;
           return {
             id: delivery.id,
             date: new Date(delivery.delivery_date).toISOString().split("T")[0],
             type: "inflow",
             quantity: delivery.quantity ?? 0,
-            action: "Delivered",
+            action: "Delivered (Stock)",
             material_id: material.id,
             material_name: material.name,
           };
@@ -176,32 +170,25 @@ const MaterialsPage = () => {
 
       // Calculate current quantities
       const quantities: Record<string, number> = {};
-      const latestOpeningStocks: Record<string, number> = {};
-
-      // Get the most recent opening stock for each material
-      openingStocksData.forEach(record => {
-        const recordDate = new Date(record.date);
-        if (!latestOpeningStocks[record.material_id] || 
-            new Date(latestOpeningStocks[record.material_id]) < recordDate) {
-          latestOpeningStocks[record.material_id] = record.quantity;
-        }
-      });
-
+      
       materialsData.forEach(material => {
-        const materialTransactions = combinedTransactions.filter(t => t.material_id === material.id);
+        // Calculate total inflow (opening stock + deliveries with 'Stock' notes)
+        const materialOpeningStocks = openingStocksData.filter(os => os.material_id === material.id);
+        const openingStock = materialOpeningStocks.reduce((sum, os) => sum + (os.quantity || 0), 0);
         
-        // Find the most recent opening stock
-        const openingStock = latestOpeningStocks[material.id] || 0;
+        // Get all deliveries for this material
+        const materialDeliveries = deliveriesData.filter(d => d.material_id === material.id);
+        const totalDeliveries = materialDeliveries.reduce((sum, d) => sum + (d.quantity || 0), 0);
         
-        const totalInflow = materialTransactions
-          .filter(t => t.type === "inflow")
-          .reduce((sum, t) => sum + (t.quantity || 0), 0);
+        // Total inflow = opening stock + deliveries
+        const totalInflow = openingStock + totalDeliveries;
         
-        const totalOutflow = materialTransactions
-          .filter(t => t.type === "outflow")
-          .reduce((sum, t) => sum + (t.quantity || 0), 0);
+        // Calculate total outflow (from material_entries)
+        const materialOutflows = outflows.filter(o => o.material_id === material.id);
+        const totalOutflow = materialOutflows.reduce((sum, o) => sum + (o.quantity || 0), 0);
         
-        quantities[material.id] = openingStock + totalInflow - totalOutflow;
+        // Current quantity = inflow - outflow
+        quantities[material.id] = totalInflow - totalOutflow;
       });
 
       setMaterialQuantities(quantities);
@@ -313,7 +300,7 @@ const MaterialsPage = () => {
     );
 
     const totalInflow = relevantTransactions
-      .filter(t => t.type === "inflow")
+      .filter(t => t.type === "inflow" || t.type === "opening_stock")
       .reduce((sum, t) => sum + (t.quantity || 0), 0);
     
     const totalOutflow = relevantTransactions
@@ -337,6 +324,7 @@ const MaterialsPage = () => {
           <Button variant="outline" onClick={() => viewHistoryForDate()}>
             View Opening Stock History
           </Button>
+          <Button onClick={() => setIsAdding(true)}>Add Material</Button>
         </div>
       </div>
 
@@ -396,6 +384,22 @@ const MaterialsPage = () => {
                           >
                             Details
                           </Button>
+                          <Button 
+                            size="sm" 
+                            variant="secondary" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpeningStockForm({
+                                ...openingStockForm,
+                                material_id: mat.id,
+                                date: new Date().toISOString().split("T")[0],
+                              });
+                              setIsOpeningStockDialogOpen(true);
+                            }}
+                          >
+                            Record Opening
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => handleDeleteMaterial(mat.id)}>Delete</Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -444,7 +448,7 @@ const MaterialsPage = () => {
                   <TableHead>Date</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Quantity</TableHead>
-                  <TableHead>Transaction</TableHead>
+                  <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -464,6 +468,36 @@ const MaterialsPage = () => {
             </Table>
           </div>
           <DialogFooter className="gap-2">
+            {viewMaterial?.id !== viewMaterial?.category && (
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setIsOutflowDialogOpen(true);
+                    setOutflowForm({
+                      ...outflowForm,
+                      material_id: viewMaterial?.id || "",
+                      date: new Date().toISOString().split("T")[0],
+                    });
+                  }}
+                >
+                  Record Outflow
+                </Button>
+                <Button 
+                  variant="secondary" 
+                  onClick={() => {
+                    setIsOpeningStockDialogOpen(true);
+                    setOpeningStockForm({
+                      material_id: viewMaterial?.id || "",
+                      quantity: calculateOpeningStock(viewMaterial?.id || "", new Date().toISOString().split("T")[0]),
+                      date: new Date().toISOString().split("T")[0],
+                    });
+                  }}
+                >
+                  Record Opening Stock
+                </Button>
+              </>
+            )}
             <Button onClick={() => setIsViewDetailsOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
@@ -501,7 +535,7 @@ const MaterialsPage = () => {
           <Input 
             type="date" 
             value={openingStockForm.date} 
-            onChange={e => setOpeningStockForm({ ...openingStockForm, date: e.target.value })} 
+            onChange(e => setOpeningStockForm({ ...openingStockForm, date: e.target.value })) 
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsOpeningStockDialogOpen(false)}>Cancel</Button>
