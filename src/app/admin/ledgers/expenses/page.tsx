@@ -628,7 +628,6 @@ export default function ExpensesLedgerPage() {
                         <td className="p-3 text-sm text-gray-500">
                           {new Date(expense.date).toLocaleDateString()}
                         </td>
-                        </td>
                       </tr>
                     ))}
                   </tbody>
