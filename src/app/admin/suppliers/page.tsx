@@ -1693,7 +1693,6 @@ if (!('material_id' in selectedBalance) && !balanceDeliveryForm.material_id) {
                         >
                           <span>💼</span> View Balances
                         </button>
-                        </button>
                       </div>
                     </td>
                   </tr>
