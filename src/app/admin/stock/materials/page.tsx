@@ -394,7 +394,6 @@ const MaterialsPage = () => {
           <Button variant="outline" onClick={() => viewHistoryForDate()}>
             View Opening Stock History
           </Button>
-          <Button onClick={() => setIsAdding(true)}>Add Material</Button>
           <Button variant="outline" onClick={() => {
             fetchAllData();
           }}>
