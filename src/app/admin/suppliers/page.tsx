@@ -2597,18 +2597,7 @@ if (!('material_id' in selectedBalance) && !balanceDeliveryForm.material_id) {
                   Services from {selectedSupplier.name}
                 </h3>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setItemForm({
-                        ...itemForm,
-                        supplier_id: selectedSupplier.id
-                      });
-                      setShowItemForm(true);
-                    }}
-                    className="px-3 py-1 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-1"
-                  >
-                    <span>+</span> Add Item
-                  </button>
+                 
                   <button 
                     onClick={() => setShowSuppliesModal(false)}
                     className="text-gray-400 hover:text-gray-500"
