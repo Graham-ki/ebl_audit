@@ -110,7 +110,6 @@ export default function CurrentAssetsPage() {
     unit_cost: ''
   });
   const [openingBalanceOwners, setOpeningBalanceOwners] = useState<OpeningBalanceOwner[]>([]);
-  const [prepaidValue, setPrepaidValue] = useState<number>(0);
 
   // Fetch inventory costs
   const fetchInventoryCosts = async () => {
@@ -299,48 +298,6 @@ export default function CurrentAssetsPage() {
       setMaterialAssets(materialAssetsData);
     } catch (error) {
       console.error("Error fetching material assets:", error);
-    }
-  };
-
-  // Fetch prepaid value from the three tables using the formula: (S1 × SP) - (SQ × SP) + CB
-  const fetchPrepaidValue = async () => {
-    try {
-      const [
-        { data: materialBalancesData, error: materialBalancesError },
-        { data: deliveriesData, error: deliveriesError },
-        { data: supplierBalancesData, error: supplierBalancesError }
-      ] = await Promise.all([
-        supabase.from("material_balances").select("opening_balance"),
-        supabase.from("deliveries").select("quantity, unit_price"),
-        supabase.from("supplier_balances").select("current_balance")
-      ]);
-
-      if (materialBalancesError) throw materialBalancesError;
-      if (deliveriesError) throw deliveriesError;
-      if (supplierBalancesError) throw supplierBalancesError;
-
-      // Calculate S1 (sum of opening_balance from material_balances)
-      const S1 = materialBalancesData?.reduce((sum, item) => 
-        sum + safeParseNumber(item.opening_balance), 0) || 0;
-
-      // Calculate SQ (sum of quantity from deliveries)
-      const SQ = deliveriesData?.reduce((sum, item) => 
-        sum + safeParseNumber(item.quantity), 0) || 0;
-
-      // Calculate SP (sum of unit_price from deliveries)
-      const SP = deliveriesData?.reduce((sum, item) => 
-        sum + safeParseNumber(item.unit_price), 0) || 0;
-
-      // Calculate CB (sum of current_balance from supplier_balances)
-      const CB = supplierBalancesData?.reduce((sum, item) => 
-        sum + safeParseNumber(item.current_balance), 0) || 0;
-
-      // Calculate prepaid value using the formula: (S1 × SP) - (SQ × SP) + CB
-      const prepaidValue = (S1 * SP) - (SQ * SP) + CB;
-      setPrepaidValue(prepaidValue);
-    } catch (error) {
-      console.error("Error fetching prepaid value:", error);
-      setPrepaidValue(0);
     }
   };
 
@@ -675,8 +632,7 @@ const fetchCashAssets = async () => {
       await Promise.all([
         fetchMaterialAssets(costs),
         fetchProductAssets(costs),
-        fetchCashAssets(),
-        fetchPrepaidValue()
+        fetchCashAssets()
       ]);
       
       // Show cost form if no costs are set
@@ -964,7 +920,7 @@ const fetchCashAssets = async () => {
             <CardDescription>Raw materials inventory value</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div className="border rounded-lg p-4 bg-blue-50">
                 <div className="text-sm text-blue-600 mb-1">Available Inventory Value</div>
                 <div className="text-2xl font-bold text-blue-700">
@@ -972,17 +928,10 @@ const fetchCashAssets = async () => {
                 </div>
               </div>
               
-              <div className="border rounded-lg p-4 bg-orange-50">
-                <div className="text-sm text-orange-600 mb-1">Prepaid Materials Value</div>
-                <div className="text-2xl font-bold text-orange-700">
-                  {formatCurrency(prepaidValue)}
-                </div>
-              </div>
-              
               <div className="border rounded-lg p-4 bg-purple-50">
                 <div className="text-sm text-purple-600 mb-1">Total Material Assets</div>
                 <div className="text-2xl font-bold text-purple-700">
-                  {formatCurrency(materialAssets.reduce((sum, item) => sum + item.total_value, 0) + prepaidValue)}
+                  {formatCurrency(materialAssets.reduce((sum, item) => sum + item.total_value, 0))}
                 </div>
               </div>
 
@@ -1124,16 +1073,10 @@ const fetchCashAssets = async () => {
                       {formatCurrency(materialAssets.reduce((sum, item) => sum + item.total_value, 0))}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Prepaid Value:</span>
-                    <span className="font-semibold">
-                      {formatCurrency(prepaidValue)}
-                    </span>
-                  </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="font-semibold">Total Materials:</span>
                     <span className="font-semibold text-indigo-600">
-                      {formatCurrency(materialAssets.reduce((sum, item) => sum + item.total_value, 0) + prepaidValue)}
+                      {formatCurrency(materialAssets.reduce((sum, item) => sum + item.total_value, 0))}
                     </span>
                   </div>
                 </div>
@@ -1168,13 +1111,13 @@ const fetchCashAssets = async () => {
               <div className="flex justify-between items-center mb-2">
                 <span className="text-lg font-semibold text-indigo-800">Total Inventory Value:</span>
                 <span className="text-2xl font-bold text-indigo-900">
-                  {formatCurrency(totalInventoryValue + prepaidValue)}
+                  {formatCurrency(totalInventoryValue)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-lg font-semibold text-indigo-800">Grand Total Current Assets:</span>
                 <span className="text-2xl font-bold text-indigo-900">
-                  {formatCurrency(cashAssets.total + totalInventoryValue + prepaidValue)}
+                  {formatCurrency(cashAssets.total + totalInventoryValue)}
                 </span>
               </div>
               <p className="text-sm text-indigo-600 mt-2">
