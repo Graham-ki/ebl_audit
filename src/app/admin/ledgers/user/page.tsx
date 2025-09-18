@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Edit, Trash2, Plus } from "lucide-react";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,13 +31,15 @@ export default function MarketersPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
+  const [openingBalances, setOpeningBalances] = useState<any[]>([]);
   const [newPayment, setNewPayment] = useState({
     date: new Date().toISOString().split('T')[0],
     amount: "",
     mode_of_payment: "",
     bank_name: "",
     mobile_money_provider: "",
-    purpose: "Order Payment"
+    purpose: "Debt Clearance",
+    order_id: null
   });
   const [newOrder, setNewOrder] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -49,11 +52,24 @@ export default function MarketersPage() {
     item: "",
     amount: ""
   });
+  const [newOpeningBalance, setNewOpeningBalance] = useState({
+    date: new Date().toISOString().split('T')[0],
+    amount: "",
+    marketer_id: "",
+    status: "Unpaid"
+  });
   const [showOrdersDialog, setShowOrdersDialog] = useState(false);
   const [showPaymentsDialog, setShowPaymentsDialog] = useState(false);
   const [showAddOrderDialog, setShowAddOrderDialog] = useState(false);
   const [showLedgerDialog, setShowLedgerDialog] = useState(false);
   const [showExpenseDialog, setShowExpenseDialog] = useState(false);
+  const [showOpeningBalanceDialog, setShowOpeningBalanceDialog] = useState(false);
+  const [showOpeningBalancesList, setShowOpeningBalancesList] = useState(false);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<any>(null);
+  const [editingPayment, setEditingPayment] = useState<any>(null);
+  const [editingExpense, setEditingExpense] = useState<any>(null);
+  const [editingOpeningBalance, setEditingOpeningBalance] = useState<any>(null);
 
   const fetchMarketers = async () => {
     setLoading(true);
@@ -94,13 +110,31 @@ export default function MarketersPage() {
     try {
       const { data, error } = await supabase
         .from("product")
-        .select("title")
+        .select("id, title")
         .order("title", { ascending: true });
 
       if (error) throw error;
       setProducts(data || []);
     } catch (error) {
       console.error("Error fetching products:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchOpeningBalances = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("opening_balances")
+        .select("*")
+        .not("marketer_id","is",null)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setOpeningBalances(data || []);
+    } catch (error) {
+      console.error("Error fetching opening balances:", error);
     } finally {
       setLoading(false);
     }
@@ -124,13 +158,13 @@ export default function MarketersPage() {
     }
   };
 
-  const fetchPayments = async (orderId: string) => {
+  const fetchPayments = async (userId: string) => {
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from("finance")
         .select("*")
-        .eq("order_id", orderId)
+        .eq("user_id", userId)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -169,7 +203,7 @@ export default function MarketersPage() {
     }
   };
 
-  const fetchTransactions = async (userId: string) => {
+const fetchTransactions = async (userId: string) => {
     setLoading(true);
     try {
       const { data: userData, error: userError } = await supabase
@@ -185,7 +219,7 @@ export default function MarketersPage() {
         .from("order")
         .select("*")
         .eq("user", userId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: true });
 
       if (ordersError) throw ordersError;
 
@@ -193,67 +227,96 @@ export default function MarketersPage() {
         .from("finance")
         .select("*")
         .eq("user_id", userId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: true });
 
       if (paymentsError) throw paymentsError;
 
-      const { data: expensesData, error: expensesError } = await supabase
-        .from("expenses")
+      const { data: openingBalancesData, error: openingBalancesError } = await supabase
+        .from("opening_balances")
         .select("*")
-        .eq("department", userData.name)
-        .order("date", { ascending: false });
+        .eq("marketer_id", userId)
+        .order("created_at", { ascending: true });
 
-      if (expensesError) throw expensesError;
+      if (openingBalancesError) throw openingBalancesError;
 
       const allTransactions = [
-        ...(ordersData?.map(order => ({
+        ...(openingBalancesData?.map(balance => ({
+          type: 'opening_balance',
+          id: balance.id,
+          date: balance.created_at,
+          item: `Opening Balance`,
+          amount: Math.abs(parseFloat(balance.amount || "0")),
+          quantity: 1,
+          unit_price: Math.abs(parseFloat(balance.amount || "0")),
+          payment: 0,
+          status: balance.status,
+          purpose: '',
+          mode_of_payment: '',
+          bank_name: '',
+          mobile_money_provider: ''
+        })) || []),
+        ...((ordersData || []).map(order => ({
           type: 'order',
           id: order.id,
           date: order.created_at,
           item: order.item,
           quantity: order.quantity,
           unit_price: order.cost,
-          amount: order.quantity * order.cost,
+          amount: Math.abs(order.quantity * order.cost),
           payment: 0,
-          expense: 0
+          purpose: '',
+          status: '',
+          mode_of_payment: '',
+          bank_name: '',
+          mobile_money_provider: ''
         })) || []),
-        ...(paymentsData?.map(payment => ({
+        ...((paymentsData || []).map(payment => ({
           type: 'payment',
           id: payment.id,
           date: payment.created_at,
           order_id: payment.order_id,
           amount: 0,
-          payment: payment.amount_paid,
-          expense: 0,
-          item: `Payment (${payment.mode_of_payment})`,
+          payment: Math.abs(payment.amount_paid),
+          item: `Payment (${payment.mode_of_payment}) - ${payment.purpose}`,
           mode_of_payment: payment.mode_of_payment,
           bank_name: payment.bank_name,
-          mobile_money_provider: payment.mode_of_mobilemoney
-        })) || []),
-        ...(expensesData?.map(expense => ({
-          type: 'expense',
-          id: expense.id,
-          date: expense.date,
-          item: expense.item,
-          amount: 0,
-          payment: 0,
-          expense: expense.amount_spent,
-          description: `Expense: ${expense.item}`
+          mobile_money_provider: payment.mode_of_mobilemoney,
+          purpose: payment.purpose || '',
+          status: '',
+          quantity: 0,
+          unit_price: 0
         })) || [])
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      let orderBalance = 0;
       let netBalance = 0;
+      let orderBalance = 0;
       const transactionsWithBalance = allTransactions.map(transaction => {
-        if (transaction.type === 'order') {
-          orderBalance += transaction.amount;
-          netBalance += transaction.amount;
+        if (transaction.type === 'opening_balance') {
+          netBalance += transaction.amount; // Add opening balance permanently
+        } else if (transaction.type === 'order') {
+          orderBalance += transaction.amount; // Add to order balance
+          netBalance += transaction.amount; // Add to net balance (increases debt)
         } else if (transaction.type === 'payment') {
-          orderBalance -= transaction.payment;
-          netBalance -= transaction.payment;
-        } else if (transaction.type === 'expense') {
-          netBalance -= transaction.expense;
+          if (transaction.purpose === 'Debt Clearance') {
+            // Direct debt reduction
+            netBalance -= transaction.payment;
+          } else {
+            // Regular payment reduces order balance first, then net balance
+            const paymentApplied = Math.min(transaction.payment, orderBalance);
+            orderBalance -= paymentApplied;
+            netBalance -= paymentApplied;
+            
+            // If payment exceeds order balance, apply remainder to net balance
+            if (transaction.payment > paymentApplied) {
+              netBalance -= (transaction.payment - paymentApplied);
+            }
+          }
         }
+        
+        // REMOVED the Math.max(0, netBalance) constraint to allow negative balances
+        // This allows negative net balance to indicate overpayment (company owes marketer)
+        orderBalance = Math.max(0, orderBalance); // Order balance should still not go negative
+        
         return {
           ...transaction,
           order_balance: orderBalance,
@@ -270,17 +333,69 @@ export default function MarketersPage() {
   };
 
   const addPayment = async () => {
-    if (!selectedOrder || !newPayment.amount || !newPayment.mode_of_payment) return;
+    if (!selectedMarketer || !newPayment.amount || !newPayment.mode_of_payment) return;
 
     try {
+      const { data: balances, error: balanceError } = await supabase
+        .from("opening_balances")
+        .select("*")
+        .eq("marketer_id", selectedMarketer.id)
+        .order("created_at", { ascending: true })
+        .limit(1);
+
+      if (balanceError) throw balanceError;
+      
+      let paymentPurpose = newPayment.purpose;
+      let remainingPaymentAmount = parseFloat(newPayment.amount);
+      
+      if (balances && balances.length > 0 && balances[0].status !== "Paid") {
+        const balance = balances[0];
+        const balanceAmount = parseFloat(balance.amount);
+        
+        if (remainingPaymentAmount >= balanceAmount) {
+          const { error: updateError } = await supabase
+            .from("opening_balances")
+            .update({ 
+              amount: "0",
+              status: "Paid"
+            })
+            .eq("id", balance.id);
+
+          if (updateError) throw updateError;
+          
+          remainingPaymentAmount -= balanceAmount;
+          paymentPurpose = "Debt Clearance";
+          
+          if (remainingPaymentAmount > 0) {
+            paymentPurpose = "Debt Clearance and Order Payment";
+          }
+        } else {
+          const newBalanceAmount = balanceAmount - remainingPaymentAmount;
+          
+          const { error: updateError } = await supabase
+            .from("opening_balances")
+            .update({ 
+              amount: newBalanceAmount.toString(),
+              status: "Partially Paid"
+            })
+            .eq("id", balance.id);
+
+          if (updateError) throw updateError;
+          
+          paymentPurpose = "Debt Clearance";
+          remainingPaymentAmount = 0;
+        }
+      } else {
+        paymentPurpose = "Order Payment";
+      }
+
       const paymentData: any = {
-        order_id: selectedOrder.id,
         amount_paid: parseFloat(newPayment.amount),
         created_at: newPayment.date,
         user_id: selectedMarketer.id,
         mode_of_payment: newPayment.mode_of_payment,
         payment_reference: `PAY-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-        purpose: newPayment.purpose
+        purpose: paymentPurpose
       };
 
       if (newPayment.mode_of_payment === 'Bank') {
@@ -295,19 +410,81 @@ export default function MarketersPage() {
 
       if (error) throw error;
       
-      await fetchPayments(selectedOrder.id);
+      await fetchPayments(selectedMarketer.id);
       await fetchTransactions(selectedMarketer.id);
+      await fetchOpeningBalances();
+      
       setNewPayment({
         date: new Date().toISOString().split('T')[0],
         amount: "",
         mode_of_payment: "",
         bank_name: "",
         mobile_money_provider: "",
-        purpose:""
+        purpose: "Debt Clearance",
+        order_id: null
       });
+      setShowPaymentForm(false);
     } catch (error) {
       console.error("Error adding payment:", error);
       alert("Error adding payment. Please try again.");
+    }
+  };
+
+  const updatePayment = async () => {
+    if (!editingPayment || !editingPayment.amount_paid || !editingPayment.mode_of_payment) return;
+
+    try {
+      const paymentData: any = {
+        amount_paid: parseFloat(editingPayment.amount_paid),
+        created_at: editingPayment.created_at,
+        mode_of_payment: editingPayment.mode_of_payment,
+        purpose: editingPayment.purpose
+      };
+
+      if (editingPayment.mode_of_payment === 'Bank') {
+        paymentData.bank_name = editingPayment.bank_name;
+      } else if (editingPayment.mode_of_payment === 'Mobile Money') {
+        paymentData.mode_of_mobilemoney = editingPayment.mobile_money_provider;
+      }
+
+      const { error } = await supabase
+        .from("finance")
+        .update(paymentData)
+        .eq("id", editingPayment.id);
+
+      if (error) throw error;
+      
+      await fetchPayments(selectedMarketer.id);
+      await fetchTransactions(selectedMarketer.id);
+      await fetchOpeningBalances();
+      
+      setEditingPayment(null);
+      alert("Payment updated successfully!");
+    } catch (error) {
+      console.error("Error updating payment:", error);
+      alert("Error updating payment. Please try again.");
+    }
+  };
+
+  const deletePayment = async (paymentId: string) => {
+    if (!confirm("Are you sure you want to delete this payment?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("finance")
+        .delete()
+        .eq("id", paymentId);
+
+      if (error) throw error;
+      
+      await fetchPayments(selectedMarketer.id);
+      await fetchTransactions(selectedMarketer.id);
+      await fetchOpeningBalances();
+      
+      alert("Payment deleted successfully!");
+    } catch (error) {
+      console.error("Error deleting payment:", error);
+      alert("Error deleting payment. Please try again.");
     }
   };
 
@@ -315,7 +492,10 @@ export default function MarketersPage() {
     if (!selectedMarketer || !newOrder.item || !newOrder.quantity || !newOrder.cost) return;
 
     try {
-      const { data, error } = await supabase
+      const product = products.find(p => p.title === newOrder.item);
+      if (!product) throw new Error("Product not found");
+
+      const { data: orderData, error: orderError } = await supabase
         .from("order")
         .insert([{
           user: selectedMarketer.id,
@@ -324,9 +504,23 @@ export default function MarketersPage() {
           cost: parseFloat(newOrder.cost),
           created_at: newOrder.date,
           total_amount: parseFloat(newOrder.quantity) * parseFloat(newOrder.cost)
+        }])
+        .select();
+
+      if (orderError) throw orderError;
+      
+      const { error: entryError } = await supabase
+        .from("product_entries")
+        .insert([{
+          product_id: product.id,
+          title: newOrder.item,
+          quantity: -parseFloat(newOrder.quantity),
+          created_at: newOrder.date,
+          created_by: 'Admin',
+          transaction: `${selectedMarketer.name}-Order`
         }]);
 
-      if (error) throw error;
+      if (entryError) throw entryError;
       
       await fetchOrders(selectedMarketer.id);
       await fetchTransactions(selectedMarketer.id);
@@ -339,6 +533,107 @@ export default function MarketersPage() {
       setShowAddOrderDialog(false);
     } catch (error) {
       console.error("Error adding order:", error);
+      alert("Error adding order. Please try again.");
+    }
+  };
+
+  const updateOrder = async () => {
+    if (!editingOrder || !editingOrder.item || !editingOrder.quantity || !editingOrder.cost) return;
+
+    try {
+      const product = products.find(p => p.title === editingOrder.item);
+      if (!product) throw new Error("Product not found");
+
+      const { data: originalOrder, error: fetchError } = await supabase
+        .from("order")
+        .select("*")
+        .eq("id", editingOrder.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const quantityDifference = parseFloat(editingOrder.quantity) - parseFloat(originalOrder.quantity);
+
+      const { error: orderError } = await supabase
+        .from("order")
+        .update({
+          item: editingOrder.item,
+          quantity: parseFloat(editingOrder.quantity),
+          cost: parseFloat(editingOrder.cost),
+          created_at: editingOrder.created_at,
+          total_amount: parseFloat(editingOrder.quantity) * parseFloat(editingOrder.cost)
+        })
+        .eq("id", editingOrder.id);
+
+      if (orderError) throw orderError;
+      
+      if (quantityDifference !== 0) {
+        const { error: entryError } = await supabase
+          .from("product_entries")
+          .insert([{
+            product_id: product.id,
+            title: editingOrder.item,
+            quantity: -quantityDifference,
+            created_at: new Date().toISOString(),
+            created_by: 'Admin',
+            transaction: `${selectedMarketer.name}-Order Update`
+          }]);
+
+        if (entryError) throw entryError;
+      }
+      
+      await fetchOrders(selectedMarketer.id);
+      await fetchTransactions(selectedMarketer.id);
+      setEditingOrder(null);
+      alert("Order updated successfully!");
+    } catch (error) {
+      console.error("Error updating order:", error);
+      alert("Error updating order. Please try again.");
+    }
+  };
+
+  const deleteOrder = async (orderId: string) => {
+    if (!confirm("Are you sure you want to delete this order?")) return;
+
+    try {
+      const { data: order, error: fetchError } = await supabase
+        .from("order")
+        .select("*")
+        .eq("id", orderId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const product = products.find(p => p.title === order.item);
+      if (product) {
+        const { error: entryError } = await supabase
+          .from("product_entries")
+          .insert([{
+            product_id: product.id,
+            title: order.item,
+            quantity: parseFloat(order.quantity),
+            created_at: new Date().toISOString(),
+            created_by: 'Admin',
+            transaction: `${selectedMarketer.name}-Order Deletion`
+          }]);
+
+        if (entryError) throw entryError;
+      }
+
+      const { error } = await supabase
+        .from("order")
+        .delete()
+        .eq("id", orderId);
+
+      if (error) throw error;
+      
+      await fetchOrders(selectedMarketer.id);
+      await fetchTransactions(selectedMarketer.id);
+      
+      alert("Order deleted successfully!");
+    } catch (error) {
+      console.error("Error deleting order:", error);
+      alert("Error deleting order. Please try again.");
     }
   };
 
@@ -380,6 +675,144 @@ export default function MarketersPage() {
     }
   };
 
+  const updateExpense = async () => {
+    if (!editingExpense || !editingExpense.item || !editingExpense.amount_spent) return;
+
+    try {
+      const { error } = await supabase
+        .from("expenses")
+        .update({
+          date: editingExpense.date,
+          item: editingExpense.item,
+          amount_spent: parseFloat(editingExpense.amount_spent)
+        })
+        .eq("id", editingExpense.id);
+
+      if (error) throw error;
+      
+      await fetchExpenses(selectedMarketer.id);
+      await fetchTransactions(selectedMarketer.id);
+      setEditingExpense(null);
+      alert("Expense updated successfully!");
+    } catch (error) {
+      console.error("Error updating expense:", error);
+      alert("Error updating expense. Please try again.");
+    }
+  };
+
+  const deleteExpense = async (expenseId: string) => {
+    if (!confirm("Are you sure you want to delete this expense?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("expenses")
+        .delete()
+        .eq("id", expenseId);
+
+      if (error) throw error;
+      
+      await fetchExpenses(selectedMarketer.id);
+      await fetchTransactions(selectedMarketer.id);
+      
+      alert("Expense deleted successfully!");
+    } catch (error) {
+      console.error("Error deleting expense:", error);
+      alert("Error deleting expense. Please try again.");
+    }
+  };
+
+  const addOpeningBalance = async () => {
+    if (!newOpeningBalance.marketer_id || !newOpeningBalance.amount) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("opening_balances")
+        .insert([{
+          marketer_id: newOpeningBalance.marketer_id,
+          amount: parseFloat(newOpeningBalance.amount),
+          status: newOpeningBalance.status,
+          created_at: newOpeningBalance.date
+        }]);
+
+      if (error) throw error;
+      
+      await fetchOpeningBalances();
+      await fetchTransactions(newOpeningBalance.marketer_id);
+      setNewOpeningBalance({
+        date: new Date().toISOString().split('T')[0],
+        amount: "",
+        marketer_id: "",
+        status: "Unpaid"
+      });
+      setShowOpeningBalanceDialog(false);
+    } catch (error) {
+      console.error("Error adding opening balance:", error);
+      alert("Error adding opening balance. Please try again.");
+    }
+  };
+
+  const updateOpeningBalance = async () => {
+    if (!editingOpeningBalance || !editingOpeningBalance.amount) return;
+
+    try {
+      const { error } = await supabase
+        .from("opening_balances")
+        .update({
+          amount: parseFloat(editingOpeningBalance.amount),
+          status: editingOpeningBalance.status,
+          created_at: editingOpeningBalance.created_at
+        })
+        .eq("id", editingOpeningBalance.id);
+
+      if (error) throw error;
+      
+      await fetchOpeningBalances();
+      await fetchTransactions(editingOpeningBalance.marketer_id);
+      setEditingOpeningBalance(null);
+      alert("Opening balance updated successfully!");
+    } catch (error) {
+      console.error("Error updating opening balance:", error);
+      alert("Error updating opening balance. Please try again.");
+    }
+  };
+
+  const deleteOpeningBalance = async (balanceId: string) => {
+    if (!confirm("Are you sure you want to delete this opening balance?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("opening_balances")
+        .delete()
+        .eq("id", balanceId);
+
+      if (error) throw error;
+      
+      await fetchOpeningBalances();
+      
+      alert("Opening balance deleted successfully!");
+    } catch (error) {
+      console.error("Error deleting opening balance:", error);
+      alert("Error deleting opening balance. Please try again.");
+    }
+  };
+
+  const calculateTotalPaymentsForMarketer = async (marketerId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("finance")
+        .select("amount_paid")
+        .eq("user_id", marketerId)
+        .eq("purpose", "Debt Clearance");
+
+      if (error) throw error;
+      
+      return data.reduce((sum, payment) => sum + payment.amount_paid, 0);
+    } catch (error) {
+      console.error("Error calculating total payments:", error);
+      return 0;
+    }
+  };
+
   const downloadLedger = () => {
     if (transactions.length === 0) return;
 
@@ -404,13 +837,15 @@ export default function MarketersPage() {
         t.type === 'order' ? 
           `${t.item} (Order #${t.id})` : 
           t.type === 'payment' ?
-          `Payment (${t.mode_of_payment})` :
+          `Payment (${t.mode_of_payment}) - ${t.purpose}` :
+          t.type === 'opening_balance' ?
+          `Opening Balance (${t.status})` :
           `Expense: ${t.item}`,
-        t.type === 'order' ? t.quantity : '',
-        t.type === 'order' ? t.unit_price : '',
-        t.type === 'order' ? t.amount : '',
+        t.type === 'order' || t.type === 'opening_balance' ? t.quantity : '',
+        t.type === 'order' || t.type === 'opening_balance' ? t.unit_price : '',
+        t.type === 'order' || t.type === 'opening_balance' ? t.amount : '',
         t.type === 'payment' ? t.payment : '',
-        t.type === 'expense' ? t.expense : '',
+        t.type === 'expense' ? t.expense.toLocaleString() : '',
         t.order_balance,
         t.net_balance
       ].map(v => `"${v}"`).join(","))
@@ -421,7 +856,7 @@ export default function MarketersPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `ledger_${selectedMarketer.name}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `ledger_${selectedMarketer?.name}_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = "hidden";
     document.body.appendChild(link);
     link.click();
@@ -435,19 +870,20 @@ export default function MarketersPage() {
   useEffect(() => {
     fetchMarketers();
     fetchProducts();
+    fetchOpeningBalances();
   }, []);
 
-  const handleViewOrders = (marketer: any) => {
+  const handleViewOrders = async (marketer: any) => {
     setSelectedMarketer(marketer);
-    fetchOrders(marketer.id);
-    fetchExpenses(marketer.id);
-    fetchTransactions(marketer.id);
+    await fetchOrders(marketer.id);
+    await fetchExpenses(marketer.id);
+    await fetchPayments(marketer.id);
+    await fetchTransactions(marketer.id);
     setShowOrdersDialog(true);
   };
 
   const handleViewPayments = (order: any) => {
     setSelectedOrder(order);
-    fetchPayments(order.id);
     setShowPaymentsDialog(true);
   };
 
@@ -464,6 +900,15 @@ export default function MarketersPage() {
         <p className="text-gray-600 dark:text-gray-300">
           View and manage marketers and their orders
         </p>
+      </div>
+
+      <div className="flex space-x-4 mb-6">
+        <Button
+          variant="outline"
+          onClick={() => setShowOpeningBalancesList(true)}
+        >
+          View Opening Balances
+        </Button>
       </div>
 
       {/* Marketers Table */}
@@ -513,6 +958,323 @@ export default function MarketersPage() {
         </Table>
       </div>
 
+      
+
+      {/* Opening Balances List Dialog */}
+      <Dialog open={showOpeningBalancesList} onOpenChange={setShowOpeningBalancesList}>
+        <DialogContent className="max-w-4xl rounded-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Opening Balances
+            </DialogTitle>
+          </DialogHeader>
+          <Table>
+            <TableHeader className="bg-gray-50">
+              <TableRow>
+                <TableHead className="font-semibold">Date</TableHead>
+                <TableHead className="font-semibold">Marketer</TableHead>
+                <TableHead className="font-semibold text-right">Original Amount</TableHead>
+                <TableHead className="font-semibold text-right">Amount Paid</TableHead>
+                <TableHead className="font-semibold text-right">Remaining Balance</TableHead>
+                <TableHead className="font-semibold">Status</TableHead>
+                <TableHead className="font-semibold text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {openingBalances.map(async (balance) => {
+                const marketer = marketers.find(m => m.id === balance.marketer_id);
+                const totalPayments = await calculateTotalPaymentsForMarketer(balance.marketer_id);
+                const remainingBalance = Math.max(0, parseFloat(balance.amount) - totalPayments);
+                
+                let status = balance.status;
+                if (remainingBalance === 0) {
+                  status = "Fully Paid";
+                } else if (totalPayments > 0) {
+                  status = "Partially Paid";
+                }
+                
+                return (
+                  <TableRow key={balance.id}>
+                    <TableCell>
+                      {new Date(balance.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>{marketer?.name || 'Unknown'}</TableCell>
+                    <TableCell className="text-right">
+                      {parseFloat(balance.amount).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {totalPayments.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {remainingBalance.toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          status === 'Fully Paid' ? 'default' :
+                          status === 'Partially Paid' ? 'secondary' :
+                          'destructive'
+                        }
+                      >
+                        {status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex gap-2 justify-end">
+                        
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {openingBalances.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                    No opening balances recorded
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Form */}
+      <Dialog open={showPaymentForm} onOpenChange={setShowPaymentForm}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Record Payment for {selectedMarketer?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date
+              </label>
+              <Input
+                type="date"
+                value={newPayment.date}
+                onChange={(e) => setNewPayment({
+                  ...newPayment,
+                  date: e.target.value
+                })}
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amount
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter amount"
+                value={newPayment.amount}
+                onChange={(e) => setNewPayment({
+                  ...newPayment,
+                  amount: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Mode of Payment
+              </label>
+              <Select
+                value={newPayment.mode_of_payment}
+                onValueChange={(value) => setNewPayment({
+                  ...newPayment,
+                  mode_of_payment: value,
+                  bank_name: "",
+                  mobile_money_provider: ""
+                })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select payment mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="Bank">Bank</SelectItem>
+                  <SelectItem value="Mobile Money">Mobile Money</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {newPayment.mode_of_payment === 'Bank' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Bank Name
+                </label>
+                <Input
+                  type="text"
+                  placeholder="Enter bank name"
+                  value={newPayment.bank_name}
+                  onChange={(e) => setNewPayment({
+                    ...newPayment,
+                    bank_name: e.target.value
+                  })}
+                />
+              </div>
+            )}
+            {newPayment.mode_of_payment === 'Mobile Money' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Mobile Money Provider
+                </label>
+                <Select
+                  value={newPayment.mobile_money_provider}
+                  onValueChange={(value) => setNewPayment({
+                    ...newPayment,
+                    mobile_money_provider: value
+                  })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MTN">MTN</SelectItem>
+                    <SelectItem value="Airtel">Airtel</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={addPayment}
+              disabled={
+                !newPayment.amount || 
+                !newPayment.mode_of_payment || 
+                (newPayment.mode_of_payment === 'Bank' && !newPayment.bank_name) ||
+                (newPayment.mode_of_payment === 'Mobile Money' && !newPayment.mobile_money_provider)
+              }
+            >
+              Record Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Payment Dialog */}
+      <Dialog open={!!editingPayment} onOpenChange={() => setEditingPayment(null)}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Edit Payment
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date
+              </label>
+              <Input
+                type="date"
+                value={editingPayment?.created_at?.split('T')[0] || ''}
+                onChange={(e) => setEditingPayment({
+                  ...editingPayment,
+                  created_at: e.target.value
+                })}
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amount
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter amount"
+                value={editingPayment?.amount_paid || ''}
+                onChange={(e) => setEditingPayment({
+                  ...editingPayment,
+                  amount_paid: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Mode of Payment
+              </label>
+              <Select
+                value={editingPayment?.mode_of_payment || ''}
+                onValueChange={(value) => setEditingPayment({
+                  ...editingPayment,
+                  mode_of_payment: value,
+                  bank_name: "",
+                  mobile_money_provider: ""
+                })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select payment mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="Bank">Bank</SelectItem>
+                  <SelectItem value="Mobile Money">Mobile Money</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {editingPayment?.mode_of_payment === 'Bank' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Bank Name
+                </label>
+                <Input
+                  type="text"
+                  placeholder="Enter bank name"
+                  value={editingPayment?.bank_name || ''}
+                  onChange={(e) => setEditingPayment({
+                    ...editingPayment,
+                    bank_name: e.target.value
+                  })}
+                />
+              </div>
+            )}
+            {editingPayment?.mode_of_payment === 'Mobile Money' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Mobile Money Provider
+                </label>
+                <Select
+                  value={editingPayment?.mobile_money_provider || ''}
+                  onValueChange={(value) => setEditingPayment({
+                    ...editingPayment,
+                    mobile_money_provider: value
+                  })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MTN">MTN</SelectItem>
+                    <SelectItem value="Airtel">Airtel</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              onClick={updatePayment}
+              disabled={
+                !editingPayment?.amount_paid || 
+                !editingPayment?.mode_of_payment || 
+                (editingPayment?.mode_of_payment === 'Bank' && !editingPayment?.bank_name) ||
+                (editingPayment?.mode_of_payment === 'Mobile Money' && !editingPayment?.mobile_money_provider)
+              }
+            >
+              Update Payment
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => deletePayment(editingPayment.id)}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Orders Dialog */}
       <Dialog open={showOrdersDialog} onOpenChange={setShowOrdersDialog}>
         <DialogContent className="max-w-6xl rounded-lg">
@@ -554,15 +1316,7 @@ export default function MarketersPage() {
                     <TableCell>
                       {(order.quantity * order.cost).toLocaleString()}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleViewPayments(order)}
-                      >
-                        View Payments
-                      </Button>
-                    </TableCell>
+                    
                   </TableRow>
                 ))}
                 {orders.length === 0 && (
@@ -577,6 +1331,301 @@ export default function MarketersPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Add Order Dialog */}
+      <Dialog open={showAddOrderDialog} onOpenChange={setShowAddOrderDialog}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Add New Order for {selectedMarketer?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date
+              </label>
+              <Input
+                type="date"
+                value={newOrder.date}
+                onChange={(e) => setNewOrder({
+                  ...newOrder,
+                  date: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Item
+              </label>
+              <Select
+                value={newOrder.item}
+                onValueChange={(value) => setNewOrder({
+                  ...newOrder,
+                  item: value
+                })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an item" />
+                </SelectTrigger>
+                <SelectContent>
+                  {products.map((product) => (
+                    <SelectItem key={product.title} value={product.title}>
+                      {product.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Quantity
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter quantity"
+                value={newOrder.quantity}
+                onChange={(e) => setNewOrder({
+                  ...newOrder,
+                  quantity: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Unit Price
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter unit price"
+                value={newOrder.cost}
+                onChange={(e) => setNewOrder({
+                  ...newOrder,
+                  cost: e.target.value
+                })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={addOrder} disabled={!newOrder.item || !newOrder.quantity || !newOrder.cost}>
+              Add Order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Order Dialog */}
+      <Dialog open={!!editingOrder} onOpenChange={() => setEditingOrder(null)}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Edit Order for {selectedMarketer?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date
+              </label>
+              <Input
+                type="date"
+                value={editingOrder?.created_at?.split('T')[0] || ''}
+                onChange={(e) => setEditingOrder({
+                  ...editingOrder,
+                  created_at: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Item
+              </label>
+              <Select
+                value={editingOrder?.item || ''}
+                onValueChange={(value) => setEditingOrder({
+                  ...editingOrder,
+                  item: value
+                })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an item" />
+                </SelectTrigger>
+                <SelectContent>
+                  {products.map((product) => (
+                    <SelectItem key={product.title} value={product.title}>
+                      {product.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Quantity
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter quantity"
+                value={editingOrder?.quantity || ''}
+                onChange={(e) => setEditingOrder({
+                  ...editingOrder,
+                  quantity: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Unit Price
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter unit price"
+                value={editingOrder?.cost || ''}
+                onChange={(e) => setEditingOrder({
+                  ...editingOrder,
+                  cost: e.target.value
+                })}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button onClick={updateOrder} disabled={!editingOrder?.item || !editingOrder?.quantity || !editingOrder?.cost}>
+              Update Order
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => deleteOrder(editingOrder.id)}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Expense Dialog */}
+      <Dialog open={showExpenseDialog} onOpenChange={setShowExpenseDialog}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Record Expense for {selectedMarketer?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date
+              </label>
+              <Input
+                type="date"
+                value={newExpense.date}
+                onChange={(e) => setNewExpense({
+                  ...newExpense,
+                  date: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Item
+              </label>
+              <Input
+                type="text"
+                placeholder="Enter expense item"
+                value={newExpense.item}
+                onChange={(e) => setNewExpense({
+                  ...newExpense,
+                  item: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amount
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter amount"
+                value={newExpense.amount}
+                onChange={(e) => setNewExpense({
+                  ...newExpense,
+                  amount: e.target.value
+                })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={addExpense} disabled={!newExpense.item || !newExpense.amount}>
+              Record Expense
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Expense Dialog */}
+      <Dialog open={!!editingExpense} onOpenChange={() => setEditingExpense(null)}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Edit Expense for {selectedMarketer?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date
+              </label>
+              <Input
+                type="date"
+                value={editingExpense?.date || ''}
+                onChange={(e) => setEditingExpense({
+                  ...editingExpense,
+                  date: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Item
+              </label>
+              <Input
+                type="text"
+                placeholder="Enter expense item"
+                value={editingExpense?.item || ''}
+                onChange={(e) => setEditingExpense({
+                  ...editingExpense,
+                  item: e.target.value
+                })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amount
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter amount"
+                value={editingExpense?.amount_spent || ''}
+                onChange={(e) => setEditingExpense({
+                  ...editingExpense,
+                  amount_spent: e.target.value
+                })}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button onClick={updateExpense} disabled={!editingExpense?.item || !editingExpense?.amount_spent}>
+              Update Expense
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => deleteExpense(editingExpense.id)}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* General Ledger Dialog */}
       <Dialog open={showLedgerDialog} onOpenChange={setShowLedgerDialog}>
         <DialogContent className="max-w-6xl rounded-lg">
@@ -619,19 +1668,21 @@ export default function MarketersPage() {
                       {transaction.type === 'order' ? 
                         `${transaction.item} (Order #${transaction.id})` : 
                         transaction.type === 'payment' ?
-                        `Payment (${transaction.mode_of_payment})` :
+                        `Payment (${transaction.mode_of_payment}) - ${transaction.purpose}` :
+                        transaction.type === 'opening_balance' ?
+                        `Opening Balance (${transaction.status})` :
                         `Expense: ${transaction.item}`}
                       {transaction.bank_name && ` - ${transaction.bank_name}`}
                       {transaction.mobile_money_provider && ` - ${transaction.mobile_money_provider}`}
                     </TableCell>
                     <TableCell className="text-right">
-                      {transaction.type === 'order' ? transaction.quantity : '-'}
+                      {transaction.type === 'order' || transaction.type === 'opening_balance' ? transaction.quantity : '-'}
                     </TableCell>
                     <TableCell className="text-right">
-                      {transaction.type === 'order' ? transaction.unit_price.toLocaleString() : '-'}
+                      {transaction.type === 'order' || transaction.type === 'opening_balance' ? transaction.unit_price.toLocaleString() : '-'}
                     </TableCell>
                     <TableCell className="text-right">
-                      {transaction.type === 'order' ? transaction.amount.toLocaleString() : '-'}
+                      {transaction.type === 'order' || transaction.type === 'opening_balance' ? transaction.amount.toLocaleString() : '-'}
                     </TableCell>
                     <TableCell className="text-right">
                       {transaction.type === 'payment' ? transaction.payment.toLocaleString() : '-'}
@@ -640,12 +1691,12 @@ export default function MarketersPage() {
                       {transaction.type === 'expense' ? transaction.expense.toLocaleString() : '-'}
                     </TableCell>
                     <TableCell className={`text-right font-medium ${
-                      transaction.order_balance > 0 ? 'text-red-600' : 'text-green-600'
+                      transaction.order_balance < 0 ? 'text-red-600' : 'text-green-600'
                     }`}>
                       {transaction.order_balance.toLocaleString()}
                     </TableCell>
                     <TableCell className={`text-right font-medium ${
-                      transaction.net_balance > 0 ? 'text-red-600' : 'text-green-600'
+                      transaction.net_balance < 0 ? 'text-red-600' : 'text-green-600'
                     }`}>
                       {transaction.net_balance.toLocaleString()}
                     </TableCell>
@@ -669,38 +1720,21 @@ export default function MarketersPage() {
         <DialogContent className="max-w-2xl rounded-lg">
           <DialogHeader>
             <DialogTitle className="text-lg font-semibold">
-              Payments for Order #{selectedOrder?.id}
+              Payments for {selectedMarketer?.name}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div className="border rounded-lg p-3">
-                <p className="text-sm text-gray-500">Total Amount</p>
-                <p className="font-bold">{selectedOrder?.total_amount.toLocaleString()}</p>
-              </div>
-              <div className="border rounded-lg p-3">
-                <p className="text-sm text-gray-500">Amount Paid</p>
-                <p className="font-bold">{totalPaid.toLocaleString()}</p>
-              </div>
-              <div className="border rounded-lg p-3">
-                <p className="text-sm text-gray-500">Balance</p>
-                <p className={`font-bold ${
-                  balance > 0 ? 'text-red-600' : 'text-green-600'
-                }`}>
-                  {balance.toLocaleString()}
-                </p>
-              </div>
-            </div>
-
             <h3 className="font-medium">Payment History</h3>
             <div className="border rounded-lg overflow-hidden">
               <Table>
                 <TableHeader className="bg-gray-50">
                   <TableRow>
                     <TableHead>Date</TableHead>
+                    <TableHead>Purpose</TableHead>
                     <TableHead>Mode</TableHead>
                     <TableHead>Details</TableHead>
                     <TableHead>Amount</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -709,6 +1743,7 @@ export default function MarketersPage() {
                       <TableCell>
                         {new Date(payment.created_at).toLocaleDateString()}
                       </TableCell>
+                      <TableCell>{payment.purpose}</TableCell>
                       <TableCell>{payment.mode_of_payment}</TableCell>
                       <TableCell>
                         {payment.mode_of_payment === 'Bank' && payment.bank_name}
@@ -717,17 +1752,47 @@ export default function MarketersPage() {
                       <TableCell>
                         {payment.amount_paid.toLocaleString()}
                       </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEditingPayment(payment)}
+                          >
+                            <Edit size={14} />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => deletePayment(payment.id)}
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                   {payments.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-4 text-gray-500">
+                      <TableCell colSpan={6} className="text-center py-4 text-gray-500">
                         No payments recorded
                       </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
               </Table>
+            </div>
+            <div className="flex justify-between items-center">
+              <div className="font-medium">
+                Total Paid: {totalPaid.toLocaleString()}
+              </div>
+              {selectedOrder && (
+                <div className={`font-medium ${
+                  balance > 0 ? 'text-red-600' : 'text-green-600'
+                }`}>
+                  Balance: {Math.abs(balance).toLocaleString()} ({balance > 0 ? 'Due' : 'Overpaid'})
+                </div>
+              )}
             </div>
           </div>
         </DialogContent>
