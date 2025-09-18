@@ -778,11 +778,6 @@ const fetchCashAssets = async () => {
         
         {/* Dialog with trigger button inside */}
         <Dialog>
-          <DialogTrigger asChild>
-            <Button>
-              Manage Inventory Costs
-            </Button>
-          </DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Manage Inventory Costs</DialogTitle>
