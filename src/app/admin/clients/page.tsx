@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -14,6 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Pencil, Trash2, Eye, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -86,6 +93,7 @@ interface Payment {
   mode_of_mobilemoney?: string;
   purpose?: string;
   order_id?: string;
+  user_id?: string;
 }
 
 interface Expense {
@@ -106,6 +114,7 @@ interface OpeningBalance {
     id: string;
     name: string;
   };
+  paid_amount?: number;
 }
 
 export default function ClientsPage() {
@@ -119,6 +128,7 @@ export default function ClientsPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [openingBalances, setOpeningBalances] = useState<OpeningBalance[]>([]);
+  const [clientPayments, setClientPayments] = useState<Payment[]>([]);
   
   const [newPayment, setNewPayment] = useState({
     date: getCurrentEATDateTime(),
@@ -126,7 +136,7 @@ export default function ClientsPage() {
     mode_of_payment: "",
     bank_name: "",
     mobile_money_provider: "",
-    purpose: "Order Payment",
+    purpose: "Payment for Orders",
     order_id: ""
   });
   
@@ -156,6 +166,12 @@ export default function ClientsPage() {
     address: ""
   });
   
+  const [editClient, setEditClient] = useState<Client | null>(null);
+  const [editOrder, setEditOrder] = useState<Order | null>(null);
+  const [editPayment, setEditPayment] = useState<Payment | null>(null);
+  const [editExpense, setEditExpense] = useState<Expense | null>(null);
+  const [editOpeningBalance, setEditOpeningBalance] = useState<OpeningBalance | null>(null);
+  
   const [showOrdersDialog, setShowOrdersDialog] = useState(false);
   const [showPaymentsDialog, setShowPaymentsDialog] = useState(false);
   const [showAddOrderDialog, setShowAddOrderDialog] = useState(false);
@@ -165,6 +181,17 @@ export default function ClientsPage() {
   const [showOpeningBalancesList, setShowOpeningBalancesList] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [showAddClientDialog, setShowAddClientDialog] = useState(false);
+  const [showEditClientDialog, setShowEditClientDialog] = useState(false);
+  const [showEditOrderDialog, setShowEditOrderDialog] = useState(false);
+  const [showEditPaymentDialog, setShowEditPaymentDialog] = useState(false);
+  const [showEditExpenseDialog, setShowEditExpenseDialog] = useState(false);
+  const [showEditOpeningBalanceDialog, setShowEditOpeningBalanceDialog] = useState(false);
+  const [deleteConfirmDialog, setDeleteConfirmDialog] = useState({
+    open: false,
+    type: "",
+    id: "",
+    name: ""
+  });
 
   const fetchClients = async () => {
     setLoading(true);
@@ -229,7 +256,29 @@ export default function ClientsPage() {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setOpeningBalances(data || []);
+      
+      // Calculate paid amounts for each opening balance
+      const balancesWithPaidAmounts = await Promise.all(
+        (data || []).map(async (balance) => {
+          const { data: paymentsData, error: paymentsError } = await supabase
+            .from("finance")
+            .select("amount_paid")
+            .eq("user_id", balance.client_id)
+            .eq("purpose", "Debt Clearance")
+            .order("created_at", { ascending: true });
+
+          if (paymentsError) throw paymentsError;
+
+          const paidAmount = paymentsData?.reduce((sum, payment) => sum + payment.amount_paid, 0) || 0;
+          
+          return {
+            ...balance,
+            paid_amount: paidAmount
+          };
+        })
+      );
+
+      setOpeningBalances(balancesWithPaidAmounts || []);
     } catch (error) {
       console.error("Error fetching opening balances:", error);
     } finally {
@@ -282,6 +331,24 @@ export default function ClientsPage() {
     }
   };
 
+  const fetchClientPayments = async (clientId: string) => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("finance")
+        .select("*")
+        .eq("user_id", clientId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setClientPayments(data || []);
+    } catch (error) {
+      console.error("Error fetching client payments:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchExpenses = async (clientId: string) => {
     setLoading(true);
     try {
@@ -309,7 +376,7 @@ export default function ClientsPage() {
     }
   };
 
-  const fetchTransactions = async (clientId: string) => {
+ const fetchTransactions = async (clientId: string) => {
     setLoading(true);
     try {
       const { data: clientData, error: clientError } = await supabase
@@ -325,7 +392,7 @@ export default function ClientsPage() {
         .from("order")
         .select("*")
         .eq("user", clientId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: true });
 
       if (ordersError) throw ordersError;
 
@@ -333,37 +400,29 @@ export default function ClientsPage() {
         .from("finance")
         .select("*")
         .eq("user_id", clientId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: true });
 
       if (paymentsError) throw paymentsError;
-
-      const { data: expensesData, error: expensesError } = await supabase
-        .from("expenses")
-        .select("*")
-        .eq("department", clientData.name)
-        .order("date", { ascending: false });
-
-      if (expensesError) throw expensesError;
 
       const { data: openingBalancesData, error: openingBalancesError } = await supabase
         .from("opening_balances")
         .select("*")
         .eq("client_id", clientId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: true });
 
       if (openingBalancesError) throw openingBalancesError;
 
+      // Combine transactions (excluding expenses since they don't affect client debt)
       const allTransactions = [
         ...(openingBalancesData?.map(balance => ({
           type: 'opening_balance',
           id: balance.id,
           date: balance.created_at,
           item: `Opening Balance`,
-          amount: parseFloat(balance.amount || "0"),
+          amount: Math.abs(parseFloat(balance.amount || "0")),
           quantity: 1,
-          unit_price: parseFloat(balance.amount || "0"),
+          unit_price: Math.abs(parseFloat(balance.amount || "0")),
           payment: 0,
-          expense: 0,
           status: balance.status,
           purpose: '',
           mode_of_payment: '',
@@ -377,9 +436,8 @@ export default function ClientsPage() {
           item: order.material,
           quantity: order.quantity,
           unit_price: order.cost,
-          amount: order.quantity * order.cost,
+          amount: Math.abs(order.quantity * order.cost),
           payment: 0,
-          expense: 0,
           purpose: '',
           status: '',
           mode_of_payment: '',
@@ -392,8 +450,7 @@ export default function ClientsPage() {
           date: payment.created_at,
           order_id: payment.order_id,
           amount: 0,
-          payment: payment.amount_paid,
-          expense: 0,
+          payment: Math.abs(payment.amount_paid),
           item: `Payment (${payment.mode_of_payment})`,
           mode_of_payment: payment.mode_of_payment,
           bank_name: payment.bank_name,
@@ -402,47 +459,24 @@ export default function ClientsPage() {
           status: '',
           quantity: 0,
           unit_price: 0
-        })) || []),
-        ...((expensesData || []).map(expense => ({
-          type: 'expense',
-          id: expense.id,
-          date: expense.date,
-          item: expense.item,
-          amount: 0,
-          payment: 0,
-          expense: expense.amount_spent,
-          description: `Expense: ${expense.item}`,
-          purpose: '',
-          status: '',
-          mode_of_payment: '',
-          bank_name: '',
-          mobile_money_provider: '',
-          quantity: 0,
-          unit_price: 0
         })) || [])
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      let orderBalance = 0;
       let netBalance = 0;
       const transactionsWithBalance = allTransactions.map(transaction => {
         if (transaction.type === 'opening_balance') {
-          netBalance += transaction.amount;
+          netBalance += transaction.amount; // Add opening balance permanently
         } else if (transaction.type === 'order') {
-          orderBalance += transaction.amount;
-          netBalance += transaction.amount;
+          netBalance += transaction.amount; // Add order amount to debt
         } else if (transaction.type === 'payment') {
-          if (transaction.purpose === 'Debt Clearance') {
-            netBalance -= transaction.payment;
-          } else {
-            orderBalance -= transaction.payment;
-            netBalance -= transaction.payment;
-          }
-        } else if (transaction.type === 'expense') {
-          netBalance -= transaction.expense;
+          netBalance -= transaction.payment; // Subtract payment from debt
         }
+        
+        // REMOVED the Math.max(0, netBalance) constraint to allow negative balances
+        // This allows negative net balance to indicate overpayment (company owes client)
+        
         return {
           ...transaction,
-          order_balance: orderBalance,
           net_balance: netBalance
         };
       });
@@ -459,60 +493,170 @@ export default function ClientsPage() {
     if (!selectedClient || !newPayment.amount || !newPayment.mode_of_payment) return;
 
     try {
-      const paymentData: any = {
-        amount_paid: parseFloat(newPayment.amount),
-        created_at: newPayment.date,
-        user_id: selectedClient.id,
-        mode_of_payment: newPayment.mode_of_payment,
-        payment_reference: `PAY-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-        purpose: newPayment.purpose
-      };
+      // Check if client has an opening balance
+      const { data: balances, error: balanceError } = await supabase
+        .from("opening_balances")
+        .select("*")
+        .eq("client_id", selectedClient.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
 
-      if (newPayment.purpose === "Order Payment" && newPayment.order_id) {
-        paymentData.order_id = newPayment.order_id;
-      }
-
-      if (newPayment.mode_of_payment === 'Bank') {
-        paymentData.bank_name = newPayment.bank_name;
-      } else if (newPayment.mode_of_payment === 'Mobile Money') {
-        paymentData.mode_of_mobilemoney = newPayment.mobile_money_provider;
-      }
-
-      const { error } = await supabase
-        .from("finance")
-        .insert([paymentData]);
-
-      if (error) throw error;
+      if (balanceError) throw balanceError;
       
-      if (newPayment.purpose === "Debt Clearance") {
-        const { data: balances, error: balanceError } = await supabase
-          .from("opening_balances")
-          .select("*")
-          .eq("client_id", selectedClient.id)
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        if (balanceError) throw balanceError;
+      let paymentPurpose = "Payment for Orders";
+      let amountToDeduct = parseFloat(newPayment.amount);
+      
+      // If client has an opening balance that's not fully paid
+      if (balances && balances.length > 0 && balances[0].status !== "Paid") {
+        const balance = balances[0];
+        const balanceAmount = parseFloat(balance.amount);
         
-        if (balances && balances.length > 0) {
-          const balance = balances[0];
-          const newAmount = parseFloat(balance.amount) - parseFloat(newPayment.amount);
+        // Get total payments made for debt clearance
+        const { data: debtPayments, error: debtPaymentsError } = await supabase
+          .from("finance")
+          .select("amount_paid")
+          .eq("user_id", selectedClient.id)
+          .eq("purpose", "Debt Clearance");
+
+        if (debtPaymentsError) throw debtPaymentsError;
+        
+        const totalPaidForDebt = debtPayments?.reduce((sum, payment) => sum + payment.amount_paid, 0) || 0;
+        const remainingDebt = balanceAmount - totalPaidForDebt;
+        
+        if (remainingDebt > 0) {
+          paymentPurpose = "Debt Clearance";
           
-          const { error: updateError } = await supabase
-            .from("opening_balances")
-            .update({ 
-              amount: newAmount.toString(),
-              status: newAmount <= 0 ? "Paid" : "Pending Clearance"
-            })
-            .eq("id", balance.id);
+          // If payment amount is more than remaining debt, split the payment
+          if (amountToDeduct > remainingDebt) {
+            // First part for debt clearance
+            const debtClearanceAmount = remainingDebt;
+            
+            // Create debt clearance payment
+            const debtPaymentData: any = {
+              amount_paid: debtClearanceAmount,
+              created_at: newPayment.date,
+              user_id: selectedClient.id,
+              mode_of_payment: newPayment.mode_of_payment,
+              payment_reference: `PAY-DEBT-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+              purpose: "Debt Clearance"
+            };
 
-          if (updateError) throw updateError;
+            if (newPayment.mode_of_payment === 'Bank') {
+              debtPaymentData.bank_name = newPayment.bank_name;
+            } else if (newPayment.mode_of_payment === 'Mobile Money') {
+              debtPaymentData.mode_of_mobilemoney = newPayment.mobile_money_provider;
+            }
+
+            const { error: debtPaymentError } = await supabase
+              .from("finance")
+              .insert([debtPaymentData]);
+
+            if (debtPaymentError) throw debtPaymentError;
+            
+            // Update opening balance status to Paid
+            const { error: updateError } = await supabase
+              .from("opening_balances")
+              .update({ 
+                status: "Paid"
+              })
+              .eq("id", balance.id);
+
+            if (updateError) throw updateError;
+            
+            // Second part for order payment (if any)
+            const orderPaymentAmount = amountToDeduct - debtClearanceAmount;
+            if (orderPaymentAmount > 0) {
+              const orderPaymentData: any = {
+                amount_paid: orderPaymentAmount,
+                created_at: newPayment.date,
+                user_id: selectedClient.id,
+                mode_of_payment: newPayment.mode_of_payment,
+                payment_reference: `PAY-ORDER-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+                purpose: "Payment for Orders"
+              };
+
+              if (newPayment.mode_of_payment === 'Bank') {
+                orderPaymentData.bank_name = newPayment.bank_name;
+              } else if (newPayment.mode_of_payment === 'Mobile Money') {
+                orderPaymentData.mode_of_mobilemoney = newPayment.mobile_money_provider;
+              }
+
+              const { error: orderPaymentError } = await supabase
+                .from("finance")
+                .insert([orderPaymentData]);
+
+              if (orderPaymentError) throw orderPaymentError;
+            }
+          } else {
+            // Entire payment goes to debt clearance
+            const paymentData: any = {
+              amount_paid: amountToDeduct,
+              created_at: newPayment.date,
+              user_id: selectedClient.id,
+              mode_of_payment: newPayment.mode_of_payment,
+              payment_reference: `PAY-DEBT-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+              purpose: "Debt Clearance"
+            };
+
+            if (newPayment.mode_of_payment === 'Bank') {
+              paymentData.bank_name = newPayment.bank_name;
+            } else if (newPayment.mode_of_payment === 'Mobile Money') {
+              paymentData.mode_of_mobilemoney = newPayment.mobile_money_provider;
+            }
+
+            const { error } = await supabase
+              .from("finance")
+              .insert([paymentData]);
+
+            if (error) throw error;
+            
+            // Check if debt is fully paid after this payment
+            const newTotalPaid = totalPaidForDebt + amountToDeduct;
+            const newStatus = newTotalPaid >= balanceAmount ? "Paid" : "Pending Clearance";
+            
+            const { error: updateError } = await supabase
+              .from("opening_balances")
+              .update({ 
+                status: newStatus
+              })
+              .eq("id", balance.id);
+
+            if (updateError) throw updateError;
+          }
+        } else {
+          // No remaining debt, proceed with normal order payment
+          paymentPurpose = "Payment for Orders";
         }
+      } else {
+        // No opening balance or already paid, proceed with normal order payment
+        paymentPurpose = "Payment for Orders";
+      }
+      
+      // If payment wasn't already processed as debt clearance, process as order payment
+      if (paymentPurpose === "Payment for Orders") {
+        const paymentData: any = {
+          amount_paid: amountToDeduct,
+          created_at: newPayment.date,
+          user_id: selectedClient.id,
+          mode_of_payment: newPayment.mode_of_payment,
+          payment_reference: `PAY-ORDER-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          purpose: "Payment for Orders"
+        };
+
+        if (newPayment.mode_of_payment === 'Bank') {
+          paymentData.bank_name = newPayment.bank_name;
+        } else if (newPayment.mode_of_payment === 'Mobile Money') {
+          paymentData.mode_of_mobilemoney = newPayment.mobile_money_provider;
+        }
+
+        const { error } = await supabase
+          .from("finance")
+          .insert([paymentData]);
+
+        if (error) throw error;
       }
 
-      if (newPayment.order_id) {
-        await fetchPayments(newPayment.order_id);
-      }
+      await fetchClientPayments(selectedClient.id);
       await fetchTransactions(selectedClient.id);
       await fetchOpeningBalances();
       
@@ -522,13 +666,53 @@ export default function ClientsPage() {
         mode_of_payment: "",
         bank_name: "",
         mobile_money_provider: "",
-        purpose: "Order Payment",
+        purpose: "Payment for Orders",
         order_id: ""
       });
       setShowPaymentForm(false);
     } catch (error) {
       console.error("Error adding payment:", error);
       alert("Error adding payment. Please try again.");
+    }
+  };
+
+  const updatePayment = async () => {
+    if (!editPayment || !editPayment.amount_paid || !editPayment.mode_of_payment) return;
+
+    try {
+      const paymentData: any = {
+        amount_paid: editPayment.amount_paid,
+        mode_of_payment: editPayment.mode_of_payment,
+        purpose: editPayment.purpose
+      };
+
+      if (editPayment.mode_of_payment === 'Bank') {
+        paymentData.bank_name = editPayment.bank_name;
+      } else if (editPayment.mode_of_payment === 'Mobile Money') {
+        paymentData.mode_of_mobilemoney = editPayment.mode_of_mobilemoney;
+      }
+
+      const { error } = await supabase
+        .from("finance")
+        .update(paymentData)
+        .eq("id", editPayment.id);
+
+      if (error) throw error;
+      
+      if (editPayment.order_id) {
+        await fetchPayments(editPayment.order_id);
+      }
+      if (selectedClient) {
+        await fetchClientPayments(selectedClient.id);
+        await fetchTransactions(selectedClient.id);
+      }
+      await fetchOpeningBalances();
+      
+      setEditPayment(null);
+      setShowEditPaymentDialog(false);
+    } catch (error) {
+      console.error("Error updating payment:", error);
+      alert("Error updating payment. Please try again.");
     }
   };
 
@@ -582,6 +766,35 @@ export default function ClientsPage() {
     }
   };
 
+  const updateOrder = async () => {
+    if (!editOrder || !editOrder.material || !editOrder.quantity || !editOrder.cost) return;
+
+    try {
+      const { error } = await supabase
+        .from("order")
+        .update({
+          material: editOrder.material,
+          quantity: editOrder.quantity,
+          cost: editOrder.cost,
+          total_amount: editOrder.quantity * editOrder.cost
+        })
+        .eq("id", editOrder.id);
+
+      if (error) throw error;
+      
+      if (selectedClient) {
+        await fetchOrders(selectedClient.id);
+        await fetchTransactions(selectedClient.id);
+      }
+      
+      setEditOrder(null);
+      setShowEditOrderDialog(false);
+    } catch (error) {
+      console.error("Error updating order:", error);
+      alert("Error updating order. Please try again.");
+    }
+  };
+
   const addExpense = async () => {
     if (!selectedClient || !newExpense.item || !newExpense.amount) return;
 
@@ -620,6 +833,34 @@ export default function ClientsPage() {
     }
   };
 
+  const updateExpense = async () => {
+    if (!editExpense || !editExpense.item || !editExpense.amount_spent) return;
+
+    try {
+      const { error } = await supabase
+        .from("expenses")
+        .update({
+          date: editExpense.date,
+          item: editExpense.item,
+          amount_spent: editExpense.amount_spent
+        })
+        .eq("id", editExpense.id);
+
+      if (error) throw error;
+      
+      if (selectedClient) {
+        await fetchExpenses(selectedClient.id);
+        await fetchTransactions(selectedClient.id);
+      }
+      
+      setEditExpense(null);
+      setShowEditExpenseDialog(false);
+    } catch (error) {
+      console.error("Error updating expense:", error);
+      alert("Error updating expense. Please try again.");
+    }
+  };
+
   const addOpeningBalance = async () => {
     if (!newOpeningBalance.client_id || !newOpeningBalance.amount) return;
 
@@ -650,6 +891,34 @@ export default function ClientsPage() {
     }
   };
 
+  const updateOpeningBalance = async () => {
+    if (!editOpeningBalance || !editOpeningBalance.amount) return;
+
+    try {
+      const { error } = await supabase
+        .from("opening_balances")
+        .update({
+          amount: editOpeningBalance.amount,
+          status: editOpeningBalance.status,
+          created_at: editOpeningBalance.created_at
+        })
+        .eq("id", editOpeningBalance.id);
+
+      if (error) throw error;
+      
+      await fetchOpeningBalances();
+      if (editOpeningBalance.client_id) {
+        await fetchTransactions(editOpeningBalance.client_id);
+      }
+      
+      setEditOpeningBalance(null);
+      setShowEditOpeningBalanceDialog(false);
+    } catch (error) {
+      console.error("Error updating opening balance:", error);
+      alert("Error updating opening balance. Please try again.");
+    }
+  };
+
   const addClient = async () => {
     if (!newClient.name || !newClient.contact) return;
 
@@ -674,6 +943,30 @@ export default function ClientsPage() {
     } catch (error) {
       console.error("Error adding client:", error);
       alert("Error adding client. Please try again.");
+    }
+  };
+
+  const updateClient = async () => {
+    if (!editClient || !editClient.name || !editClient.contact) return;
+
+    try {
+      const { error } = await supabase
+        .from("clients")
+        .update({
+          name: editClient.name,
+          contact: editClient.contact,
+          address: editClient.address
+        })
+        .eq("id", editClient.id);
+
+      if (error) throw error;
+      
+      await fetchClients();
+      setEditClient(null);
+      setShowEditClientDialog(false);
+    } catch (error) {
+      console.error("Error updating client:", error);
+      alert("Error updating client. Please try again.");
     }
   };
 
@@ -707,6 +1000,90 @@ export default function ClientsPage() {
     } catch (error) {
       console.error("Error updating opening balance status:", error);
       alert("Error updating status. Please try again.");
+    }
+  };
+
+  const deleteItem = async () => {
+    const { type, id } = deleteConfirmDialog;
+    
+    try {
+      let error;
+      
+      switch (type) {
+        case "client":
+          ({ error } = await supabase
+            .from("clients")
+            .delete()
+            .eq("id", id));
+          break;
+        case "order":
+          ({ error } = await supabase
+            .from("order")
+            .delete()
+            .eq("id", id));
+          break;
+        case "payment":
+          ({ error } = await supabase
+            .from("finance")
+            .delete()
+            .eq("id", id));
+          break;
+        case "expense":
+          ({ error } = await supabase
+            .from("expenses")
+            .delete()
+            .eq("id", id));
+          break;
+        case "opening_balance":
+          ({ error } = await supabase
+            .from("opening_balances")
+            .delete()
+            .eq("id", id));
+          break;
+        default:
+          throw new Error("Unknown item type");
+      }
+
+      if (error) throw error;
+      
+      // Refresh data based on the deleted item type
+      switch (type) {
+        case "client":
+          await fetchClients();
+          break;
+        case "order":
+          if (selectedClient) {
+            await fetchOrders(selectedClient.id);
+            await fetchTransactions(selectedClient.id);
+          }
+          break;
+        case "payment":
+          if (selectedOrder) {
+            await fetchPayments(selectedOrder.id);
+          }
+          if (selectedClient) {
+            await fetchClientPayments(selectedClient.id);
+            await fetchTransactions(selectedClient.id);
+          }
+          break;
+        case "expense":
+          if (selectedClient) {
+            await fetchExpenses(selectedClient.id);
+            await fetchTransactions(selectedClient.id);
+          }
+          break;
+        case "opening_balance":
+          await fetchOpeningBalances();
+          if (selectedClient) {
+            await fetchTransactions(selectedClient.id);
+          }
+          break;
+      }
+      
+      setDeleteConfirmDialog({ open: false, type: "", id: "", name: "" });
+    } catch (error) {
+      console.error(`Error deleting ${type}:`, error);
+      alert(`Error deleting ${type}. Please try again.`);
     }
   };
 
@@ -774,6 +1151,7 @@ export default function ClientsPage() {
     fetchOrders(client.id);
     fetchExpenses(client.id);
     fetchTransactions(client.id);
+    fetchClientPayments(client.id);
     setShowOrdersDialog(true);
   };
 
@@ -785,6 +1163,35 @@ export default function ClientsPage() {
 
   const handleViewLedger = () => {
     setShowLedgerDialog(true);
+  };
+
+  const handleEditClient = (client: Client) => {
+    setEditClient(client);
+    setShowEditClientDialog(true);
+  };
+
+  const handleEditOrder = (order: Order) => {
+    setEditOrder(order);
+    setShowEditOrderDialog(true);
+  };
+
+  const handleEditPayment = (payment: Payment) => {
+    setEditPayment(payment);
+    setShowEditPaymentDialog(true);
+  };
+
+  const handleEditExpense = (expense: Expense) => {
+    setEditExpense(expense);
+    setShowEditExpenseDialog(true);
+  };
+
+  const handleEditOpeningBalance = (balance: OpeningBalance) => {
+    setEditOpeningBalance(balance);
+    setShowEditOpeningBalanceDialog(true);
+  };
+
+  const handleDeleteItem = (type: string, id: string, name: string) => {
+    setDeleteConfirmDialog({ open: true, type, id, name });
   };
 
   return (
@@ -840,7 +1247,7 @@ export default function ClientsPage() {
                       onClick={() => handleViewOrders(client)}
                       className="mr-2"
                     >
-                      View Orders
+                      <Eye size={16} className="mr-1" /> View
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -855,156 +1262,6 @@ export default function ClientsPage() {
           </TableBody>
         </Table>
       </div>
-
-      {/* Add Client Dialog */}
-      <Dialog open={showAddClientDialog} onOpenChange={setShowAddClientDialog}>
-        <DialogContent className="max-w-md rounded-lg">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-semibold">
-              Add New Client
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Name
-              </label>
-              <Input
-                type="text"
-                placeholder="Client name"
-                value={newClient.name}
-                onChange={(e) => setNewClient({
-                  ...newClient,
-                  name: e.target.value
-                })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Contact
-              </label>
-              <Input
-                type="text"
-                placeholder="Phone number"
-                value={newClient.contact}
-                onChange={(e) => setNewClient({
-                  ...newClient,
-                  contact: e.target.value
-                })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Address
-              </label>
-              <Input
-                type="text"
-                placeholder="Physical address"
-                value={newClient.address}
-                onChange={(e) => setNewClient({
-                  ...newClient,
-                  address: e.target.value
-                })}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={addClient} disabled={!newClient.name || !newClient.contact}>
-              Add Client
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Opening Balance Dialog */}
-      <Dialog open={showOpeningBalanceDialog} onOpenChange={setShowOpeningBalanceDialog}>
-        <DialogContent className="max-w-md rounded-lg">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-semibold">
-              Record Client Opening Balance
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Date & Time
-              </label>
-              <Input
-                type="datetime-local"
-                value={newOpeningBalance.date}
-                onChange={(e) => setNewOpeningBalance({
-                  ...newOpeningBalance,
-                  date: e.target.value
-                })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Client
-              </label>
-              <Select
-                value={newOpeningBalance.client_id}
-                onValueChange={(value) => setNewOpeningBalance({
-                  ...newOpeningBalance,
-                  client_id: value
-                })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a client" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.map((client) => (
-                    <SelectItem key={client.id} value={client.id}>
-                      {client.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Amount
-              </label>
-              <Input
-                type="number"
-                placeholder="Enter amount"
-                value={newOpeningBalance.amount}
-                onChange={(e) => setNewOpeningBalance({
-                  ...newOpeningBalance,
-                  amount: e.target.value
-                })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Status
-              </label>
-              <Select
-                value={newOpeningBalance.status}
-                onValueChange={(value) => setNewOpeningBalance({
-                  ...newOpeningBalance,
-                  status: value
-                })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Unpaid">Unpaid</SelectItem>
-                  <SelectItem value="Paid">Paid</SelectItem>
-                  <SelectItem value="Pending Clearance">Pending Clearance</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={addOpeningBalance} disabled={!newOpeningBalance.client_id || !newOpeningBalance.amount}>
-              Record Opening Balance
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Client Opening Balances List Dialog */}
       <Dialog open={showOpeningBalancesList} onOpenChange={setShowOpeningBalancesList}>
         <DialogContent className="max-w-4xl rounded-lg">
@@ -1020,13 +1277,18 @@ export default function ClientsPage() {
                   <TableHead className="font-semibold">Date & Time</TableHead>
                   <TableHead className="font-semibold">Client</TableHead>
                   <TableHead className="font-semibold text-right">Amount</TableHead>
+                  <TableHead className="font-semibold text-right">Paid</TableHead>
+                  <TableHead className="font-semibold text-right">Balance</TableHead>
                   <TableHead className="font-semibold">Status</TableHead>
-                  <TableHead className="font-semibold text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {openingBalances.map((balance) => {
                   const client = clients.find(c => c.id === balance.client_id);
+                  const balanceAmount = parseFloat(balance.amount || "0");
+                  const paidAmount = balance.paid_amount || 0;
+                  const remainingBalance = balanceAmount - paidAmount;
+                  
                   return (
                     <TableRow key={balance.id}>
                       <TableCell>
@@ -1034,7 +1296,13 @@ export default function ClientsPage() {
                       </TableCell>
                       <TableCell>{client?.name || 'Unknown Client'}</TableCell>
                       <TableCell className="text-right">
-                        {parseFloat(balance.amount || "0").toLocaleString()}
+                        {balanceAmount.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {paidAmount.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {remainingBalance.toLocaleString()}
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -1047,28 +1315,12 @@ export default function ClientsPage() {
                           {balance.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <Select
-                          value={balance.status}
-                          onValueChange={(value) => updateOpeningBalanceStatus(balance.id, value)}
-                        >
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Change Status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Unpaid">Unpaid</SelectItem>
-                            <SelectItem value="Pay">Pay</SelectItem>
-                            <SelectItem value="Paid">Paid</SelectItem>
-                            <SelectItem value="Pending Clearance">Pending Clearance</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
                     </TableRow>
                   );
                 })}
                 {openingBalances.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                       No client opening balances recorded
                     </TableCell>
                   </TableRow>
@@ -1084,9 +1336,7 @@ export default function ClientsPage() {
         <DialogContent className="max-w-md rounded-lg">
           <DialogHeader>
             <DialogTitle className="text-lg font-semibold">
-              {newPayment.purpose === "Debt Clearance" 
-                ? "Record Payment for Debt Clearance" 
-                : "Record Payment for Order"}
+              Record Payment for {selectedClient?.name}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
@@ -1103,32 +1353,6 @@ export default function ClientsPage() {
                 })}
               />
             </div>
-            
-            {newPayment.purpose === "Order Payment" && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Order
-                </label>
-                <Select
-                  value={newPayment.order_id}
-                  onValueChange={(value) => setNewPayment({
-                    ...newPayment,
-                    order_id: value
-                  })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select order" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {orders.map((order) => (
-                      <SelectItem key={order.id} value={order.id}>
-                        {order.material} (Qty: {order.quantity}) - {(order.total_amount || 0).toLocaleString()}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
             
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1197,7 +1421,7 @@ export default function ClientsPage() {
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
+                    </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="MTN">MTN</SelectItem>
                     <SelectItem value="Airtel">Airtel</SelectItem>
@@ -1213,11 +1437,126 @@ export default function ClientsPage() {
                 !newPayment.amount || 
                 !newPayment.mode_of_payment || 
                 (newPayment.mode_of_payment === 'Bank' && !newPayment.bank_name) ||
-                (newPayment.mode_of_payment === 'Mobile Money' && !newPayment.mobile_money_provider) ||
-                (newPayment.purpose === "Order Payment" && !newPayment.order_id)
+                (newPayment.mode_of_payment === 'Mobile Money' && !newPayment.mobile_money_provider)
               }
             >
               Record Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Payment Dialog */}
+      <Dialog open={showEditPaymentDialog} onOpenChange={setShowEditPaymentDialog}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Edit Payment
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date & Time
+              </label>
+              <Input
+                type="datetime-local"
+                value={editPayment?.created_at ? new Date(editPayment.created_at).toISOString().slice(0, 16) : ""}
+                onChange={(e) => setEditPayment(editPayment ? {
+                  ...editPayment,
+                  created_at: e.target.value
+                } : null)}
+                disabled={true}
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amount
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter amount"
+                value={editPayment?.amount_paid || ""}
+                onChange={(e) => setEditPayment(editPayment ? {
+                  ...editPayment,
+                  amount_paid: parseFloat(e.target.value)
+                } : null)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Mode of Payment
+              </label>
+              <Select
+                value={editPayment?.mode_of_payment || ""}
+                onValueChange={(value) => setEditPayment(editPayment ? {
+                  ...editPayment,
+                  mode_of_payment: value,
+                  bank_name: value !== 'Bank' ? "" : editPayment?.bank_name,
+                  mode_of_mobilemoney: value !== 'Mobile Money' ? "" : editPayment?.mode_of_mobilemoney
+                } : null)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select payment mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="Bank">Bank</SelectItem>
+                  <SelectItem value="Mobile Money">Mobile Money</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {editPayment?.mode_of_payment === 'Bank' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Bank Name
+                </label>
+                <Input
+                  type="text"
+                  placeholder="Enter bank name"
+                  value={editPayment?.bank_name || ""}
+                  onChange={(e) => setEditPayment(editPayment ? {
+                    ...editPayment,
+                    bank_name: e.target.value
+                  } : null)}
+                />
+              </div>
+            )}
+            {editPayment?.mode_of_payment === 'Mobile Money' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Mobile Money Provider
+                </label>
+                <Select
+                  value={editPayment?.mode_of_mobilemoney || ""}
+                  onValueChange={(value) => setEditPayment(editPayment ? {
+                    ...editPayment,
+                    mode_of_mobilemoney: value
+                  } : null)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MTN">MTN</SelectItem>
+                    <SelectItem value="Airtel">Airtel</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={updatePayment}
+              disabled={
+                !editPayment?.amount_paid || 
+                !editPayment?.mode_of_payment || 
+                (editPayment.mode_of_payment === 'Bank' && !editPayment.bank_name) ||
+                (editPayment.mode_of_payment === 'Mobile Money' && !editPayment.mode_of_mobilemoney)
+              }
+            >
+              Update Payment
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1265,13 +1604,16 @@ export default function ClientsPage() {
                       {((order.quantity || 0) * (order.cost || 0)).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleViewPayments(order)}
-                      >
-                        View Payments
-                      </Button>
+                      <div className="flex justify-end space-x-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleViewPayments(order)}
+                        >
+                          <Eye size={14} className="mr-1" /> Payments
+                        </Button>
+                        
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1370,6 +1712,89 @@ export default function ClientsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Order Dialog */}
+      <Dialog open={showEditOrderDialog} onOpenChange={setShowEditOrderDialog}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Edit Order for {selectedClient?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date & Time
+              </label>
+              <Input
+                type="datetime-local"
+                value={editOrder?.created_at ? new Date(editOrder.created_at).toISOString().slice(0, 16) : ""}
+                onChange={(e) => setEditOrder(editOrder ? {
+                  ...editOrder,
+                  created_at: e.target.value
+                } : null)}
+                disabled={true}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Material
+              </label>
+              <Select
+                value={editOrder?.material || ""}
+                onValueChange={(value) => setEditOrder(editOrder ? {
+                  ...editOrder,
+                  material: value
+                } : null)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a material" />
+                </SelectTrigger>
+                <SelectContent>
+                  {materials.map((material) => (
+                    <SelectItem key={material.name} value={material.name}>
+                      {material.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Quantity
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter quantity"
+                value={editOrder?.quantity || ""}
+                onChange={(e) => setEditOrder(editOrder ? {
+                  ...editOrder,
+                  quantity: parseFloat(e.target.value)
+                } : null)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Unit Price
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter unit price"
+                value={editOrder?.cost || ""}
+                onChange={(e) => setEditOrder(editOrder ? {
+                  ...editOrder,
+                  cost: parseFloat(e.target.value)
+                } : null)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={updateOrder} disabled={!editOrder?.material || !editOrder?.quantity || !editOrder?.cost}>
+              Update Order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Add Expense Dialog */}
       <Dialog open={showExpenseDialog} onOpenChange={setShowExpenseDialog}>
         <DialogContent className="max-w-md rounded-lg">
@@ -1424,6 +1849,65 @@ export default function ClientsPage() {
           <DialogFooter>
             <Button onClick={addExpense} disabled={!newExpense.item || !newExpense.amount}>
               Record Expense
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Expense Dialog */}
+      <Dialog open={showEditExpenseDialog} onOpenChange={setShowEditExpenseDialog}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Edit Expense for {selectedClient?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date & Time
+              </label>
+              <Input
+                type="datetime-local"
+                value={editExpense?.date ? new Date(editExpense.date).toISOString().slice(0, 16) : ""}
+                onChange={(e) => setEditExpense(editExpense ? {
+                  ...editExpense,
+                  date: e.target.value
+                } : null)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Item
+              </label>
+              <Input
+                type="text"
+                placeholder="Enter expense item"
+                value={editExpense?.item || ""}
+                onChange={(e) => setEditExpense(editExpense ? {
+                  ...editExpense,
+                  item: e.target.value
+                } : null)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amount
+              </label>
+              <Input
+                type="number"
+                placeholder="Enter amount"
+                value={editExpense?.amount_spent || ""}
+                onChange={(e) => setEditExpense(editExpense ? {
+                  ...editExpense,
+                  amount_spent: parseFloat(e.target.value)
+                } : null)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={updateExpense} disabled={!editExpense?.item || !editExpense?.amount_spent}>
+              Update Expense
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1555,6 +2039,7 @@ export default function ClientsPage() {
                     <TableHead>Mode</TableHead>
                     <TableHead>Details</TableHead>
                     <TableHead>Amount</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1571,11 +2056,29 @@ export default function ClientsPage() {
                       <TableCell>
                         {(payment.amount_paid || 0).toLocaleString()}
                       </TableCell>
+                      <TableCell>
+                        <div className="flex space-x-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleEditPayment(payment)}
+                          >
+                            <Pencil size={14} />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleDeleteItem("payment", payment.id, `Payment of ${payment.amount_paid}`)}
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                   {payments.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-4 text-gray-500">
+                      <TableCell colSpan={5} className="text-center py-4 text-gray-500">
                         No payments recorded
                       </TableCell>
                     </TableRow>
@@ -1584,6 +2087,28 @@ export default function ClientsPage() {
               </Table>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmDialog.open} onOpenChange={(open) => setDeleteConfirmDialog({...deleteConfirmDialog, open})}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">
+              Confirm Deletion
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this {deleteConfirmDialog.type}: {deleteConfirmDialog.name}? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmDialog({ open: false, type: "", id: "", name: "" })}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={deleteItem}>
+              Delete
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
